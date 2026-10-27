@@ -916,3 +916,12 @@ body {
   color: #fffdf4 !important;
   text-shadow: 0 1px 2px rgba(0,0,0,0.7), 1px 0 rgba(0,0,0,0.7), -1px 0 rgba(0,0,0,0.7), 0 -1px rgba(0,0,0,0.7) !important;
 }
+
+.square.checked-king {
+  background-color: #d44a3f !important;
+  box-shadow: inset 0 0 0 3px #f2665d !important;
+}
+.square.checked-king .piece {
+  color: #fffdf4 !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.7), 1px 0 rgba(0,0,0,0.7), -1px 0 rgba(0,0,0,0.7), 0 -1px rgba(0,0,0,0.7) !important;
+}
