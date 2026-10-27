@@ -91,6 +91,28 @@ app.get("/api/games/live", (_req, res) => {
   }
 });
 
+app.delete("/api/games/:id", async (req, res) => {
+  if (!db) return res.status(503).json({ error: "DB not configured" });
+  try {
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const r = await db.execute({ sql: "DELETE FROM chess_games WHERE id = ?", args: [id] });
+    res.json({ ok: true, deleted: r.rowsAffected });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/games", async (_req, res) => {
+  if (!db) return res.status(503).json({ error: "DB not configured" });
+  try {
+    const r = await db.execute("DELETE FROM chess_games");
+    res.json({ ok: true, deleted: r.rowsAffected });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get(/.*/, (_req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 
 function cleanName(value) {

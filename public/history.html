@@ -11,7 +11,7 @@
     .tab.active{background:var(--olive);color:#14200a;border-color:var(--olive)}
     .table-wrap{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
     .table-head{display:grid;grid-template-columns:70px 1fr 1fr 90px 80px 70px;gap:10px;padding:10px 14px;background:var(--bg-2);font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase}
-    .game-row{display:grid;grid-template-columns:70px 1fr 1fr 90px 80px 70px;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);font-size:13px;align-items:center}
+    .game-row{display:grid;grid-template-columns:70px 1fr 1fr 90px 80px 70px;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);font-size:13px;align-items:center;position:relative;padding-right:50px}
     .game-row:last-child{border-bottom:none}
     .game-row.clickable{cursor:pointer;transition:background .15s}
     .game-row.clickable:hover{background:rgba(155,201,108,.05)}
@@ -44,6 +44,7 @@
     <div class="tabs">
       <button class="tab active" onclick="switchTab('live')">🔴 Live Games</button>
       <button class="tab" onclick="switchTab('history')">📜 History</button>
+      <button id="clearAllBtn" onclick="clearAll()" style="margin-left:auto;background:rgba(224,104,79,.12);color:#e0684f;border:1px solid rgba(224,104,79,.35);padding:10px 16px;border-radius:10px;font-weight:700;font-size:12px;cursor:pointer;display:none">🗑 Clear all</button>
     </div>
     <div id="live" class="table-wrap">
       <div class="table-head"><span>Code</span><span>White</span><span>Black</span><span>Turn</span><span>Moves</span><span>Watch</span></div>
@@ -60,6 +61,7 @@
       event.target.classList.add('active');
       document.getElementById('live').classList.toggle('hidden',which!=='live');
       document.getElementById('history').classList.toggle('hidden',which!=='history');
+      document.getElementById('clearAllBtn').style.display = which === 'history' ? 'inline-block' : 'none';
     }
     function fmt(sec){if(typeof sec!=='number')return '—';return Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0')}
     function fmtDate(iso){
@@ -106,6 +108,9 @@
               <span>${fmt(g.duration_seconds)}</span>
               <span class="date">${fmtDate(g.started_at)}</span>
             </div>
+            <div style="position:absolute;right:14px;top:50%;transform:translateY(-50%);">
+              <button onclick="event.stopPropagation();deleteGame(${g.id})" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:4px 8px;border-radius:6px;cursor:pointer;font-size:12px">🗑</button>
+            </div>
             <div class="game-row" style="border-bottom:1px solid var(--line)">
               <span style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center">
                 <span style="font-size:11px;color:var(--muted)">${moveCount} moves · ${g.result}</span>
@@ -121,8 +126,23 @@
       const el = document.getElementById('moves-'+i);
       if(el) el.classList.toggle('hidden');
     }
+    async function deleteGame(id) {
+      if (!confirm('Delete this game from history?')) return;
+      try {
+        const r = await fetch('/api/games/' + id, { method: 'DELETE' });
+        if (r.ok) { loadHistory(); } else { alert('Delete failed'); }
+      } catch(e) { alert('Delete failed'); }
+    }
+    async function clearAll() {
+      if (!confirm('Delete ALL game history? This cannot be undone.')) return;
+      try {
+        const r = await fetch('/api/games', { method: 'DELETE' });
+        if (r.ok) { loadHistory(); } else { alert('Clear failed'); }
+      } catch(e) { alert('Clear failed'); }
+    }
     loadLive();loadHistory();
     setInterval(loadLive,5000);
   </script>
 </body>
 </html>
+<!-- css patch -->
