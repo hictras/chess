@@ -54,7 +54,9 @@ function publicState(room) {
       game.isDraw() ? "draw" : game.isCheck() ? "check" : "playing",
     winner: room.resigned ? (room.resigned === "w" ? "b" : "w") : game.isCheckmate() ? (game.turn() === "w" ? "b" : "w") : null,
     drawOffer: room.drawOffer,
-    rematch: room.rematch
+    rematch: room.rematch,
+    timeLeft: room.timeLeft,
+    running: !!(room.players.w?.connected && room.players.b?.connected) && !room.game.isGameOver()
   };
 }
 function emitState(room) {
@@ -88,7 +90,9 @@ io.on("connection", socket => {
     const code = makeCode();
     const room = {
       code, game: new Chess(), drawOffer: null, rematch: { w: false, b: false },
-      players: { w: null, b: null }, createdAt: Date.now()
+      players: { w: null, b: null }, createdAt: Date.now(),
+      timeLeft: { w: 600, b: 600 },        // 600s = 10 minutes
+      lastTick: Date.now()
     };
     room.players.w = {
       name: cleanName(name), token: token || crypto.randomUUID(),
@@ -136,6 +140,7 @@ io.on("connection", socket => {
     const room = rooms.get(socket.data.roomCode);
     const color = getPlayer(room, socket);
     if (!room || !color) return sendError(socket, "Join a room before moving.");
+    if (!room.players.w || !room.players.b) return sendError(socket, "Waiting for an opponent to join.");
     if (room.game.isGameOver()) return sendError(socket, "This game has ended.");
     if (room.game.turn() !== color) return sendError(socket, "It is not your turn.");
     try {
@@ -223,5 +228,36 @@ setInterval(() => {
     if (!occupied && room.createdAt < cutoff) rooms.delete(code);
   }
 }, 30 * 60 * 1000).unref();
+
+
+// Global clock: ticks every second for every active room
+setInterval(() => {
+  const now = Date.now();
+  for (const room of rooms.values()) {
+    if (!room.players.w || !room.players.b || !room.players.w.connected || !room.players.b.connected) {
+      room.lastTick = now;
+      continue;
+    }
+    if (room.game.isGameOver()) {
+      room.lastTick = now;
+      continue;
+    }
+    const dt = Math.max(0, Math.round((now - room.lastTick) / 1000));
+    if (dt <= 0) continue;
+    room.lastTick = now;
+
+    const turn = room.game.turn();
+    room.timeLeft[turn] = Math.max(0, room.timeLeft[turn] - dt);
+
+    if (room.timeLeft[turn] === 0) {
+      room.resigned = turn;
+      room.game.header("Result", turn === "w" ? "0-1" : "1-0");
+      emitState(room);
+      io.to(room.code).emit("notice", (turn === "w" ? "White" : "Black") + " ran out of time.");
+    } else {
+      emitState(room);
+    }
+  }
+}, 1000);
 
 server.listen(PORT, "0.0.0.0", () => console.log(`Chess Online listening on ${PORT}`));
