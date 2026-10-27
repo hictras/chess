@@ -1,23 +1,26 @@
 /* ==========================================================================
-   CHESS — compact premium UI. IDs and classes match app.js exactly.
+   CHESS — compact olive-green theme
+   Matches app.js exactly. No JS changes needed.
    ========================================================================== */
 
 :root {
   color-scheme: dark;
-  --bg: #141210;
-  --bg-2: #1a1714;
-  --surface: #1f1c18;
-  --surface-2: #26221d;
-  --line: #302b24;
-  --line-2: #3d372e;
-  --ink: #f2ecdf;
-  --ink-soft: #b8afa0;
-  --muted: #8a8172;
-  --accent: #c9a15f;       /* warm gold */
-  --accent-soft: #e6c98f;
-  --olive: #7fa650;
+  --bg: #141810;
+  --bg-2: #1a2013;
+  --surface: #1f2716;
+  --surface-2: #262f1c;
+  --line: #2f3a24;
+  --line-2: #3d4b2e;
+  --ink: #f1f4e8;
+  --ink-soft: #b8c0a8;
+  --muted: #8a9478;
+  --olive: #9bc96c;         /* light green accent for text/links */
+  --olive-bright: #b9e08a;  /* active highlight */
+  --olive-dark: #5f9136;
+  --olive-deep: #3d5f22;
+  --cream: #eeeed2;
+  --brown: #769656;
   --danger: #e0684f;
-  --cream: #f0e6d2;
   --radius: 14px;
   --radius-lg: 20px;
   --font: 'Inter', system-ui, -apple-system, sans-serif;
@@ -29,8 +32,8 @@ html, body { min-height: 100%; }
 
 body {
   background:
-    radial-gradient(ellipse at 50% -30%, rgba(201, 161, 95, 0.08), transparent 55%),
-    radial-gradient(ellipse at 100% 100%, rgba(127, 166, 80, 0.05), transparent 50%),
+    radial-gradient(ellipse at 50% -30%, rgba(155, 201, 108, 0.10), transparent 55%),
+    radial-gradient(ellipse at 100% 100%, rgba(118, 150, 86, 0.06), transparent 50%),
     var(--bg);
   color: var(--ink);
   font-family: var(--font);
@@ -48,7 +51,7 @@ body {
   justify-content: space-between;
   padding: 0 20px;
   border-bottom: 1px solid var(--line);
-  background: rgba(20, 18, 16, 0.8);
+  background: rgba(20, 24, 16, 0.85);
   backdrop-filter: blur(8px);
   position: sticky;
   top: 0;
@@ -67,8 +70,8 @@ body {
   width: 32px;
   height: 32px;
   border-radius: 9px;
-  background: var(--accent);
-  color: #1a1410;
+  background: var(--olive);
+  color: #14200a;
   display: grid;
   place-items: center;
   font-size: 20px;
@@ -125,9 +128,9 @@ body {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 2px;
-  color: var(--accent);
+  color: var(--olive);
   padding: 6px 12px;
-  border: 1px solid rgba(201, 161, 95, 0.3);
+  border: 1px solid rgba(155, 201, 108, 0.35);
   border-radius: 999px;
   margin-bottom: 16px;
 }
@@ -144,7 +147,7 @@ body {
 .hero h1 em {
   font-style: italic;
   font-weight: 500;
-  color: var(--accent);
+  color: var(--olive);
 }
 
 .hero p {
@@ -179,7 +182,7 @@ body {
 
 .card-head .icon {
   font-size: 26px;
-  color: var(--accent);
+  color: var(--olive);
   opacity: 0.85;
 }
 
@@ -206,11 +209,11 @@ body {
 }
 
 .text-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(201, 161, 95, 0.15);
+  border-color: var(--olive);
+  box-shadow: 0 0 0 3px rgba(155, 201, 108, 0.18);
 }
 
-.text-input::placeholder { color: #5a5347; }
+.text-input::placeholder { color: #5a6650; }
 
 .code-input {
   letter-spacing: 4px;
@@ -242,8 +245,8 @@ body {
 .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 
 .btn-primary {
-  background: var(--accent);
-  color: #1a1410;
+  background: var(--olive);
+  color: #14200a;
 }
 
 .btn-create {
@@ -332,7 +335,7 @@ body {
   gap: 8px;
   margin-top: 16px;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(155, 201, 108, 0.04);
   border: 1px solid var(--line);
   border-radius: 9px;
   color: var(--muted);
@@ -377,13 +380,13 @@ body {
   font-family: var(--font-mono);
   font-weight: 800;
   letter-spacing: 3px;
-  color: var(--accent);
+  color: var(--olive);
 }
 
 .copy-btn {
   background: transparent;
   border: none;
-  color: var(--accent);
+  color: var(--olive);
   font: 700 11px var(--font);
   cursor: pointer;
   padding: 4px 8px;
@@ -391,7 +394,7 @@ body {
   transition: background .15s;
 }
 
-.copy-btn:hover { background: rgba(201, 161, 95, 0.1); }
+.copy-btn:hover { background: rgba(155, 201, 108, 0.12); }
 
 .game-grid {
   display: grid;
@@ -433,9 +436,9 @@ body {
 }
 
 .self-avatar {
-  background: var(--accent);
-  color: #1a1410;
-  border-color: var(--accent);
+  background: var(--olive);
+  color: #14200a;
+  border-color: var(--olive);
 }
 
 .player-info {
@@ -468,12 +471,15 @@ body {
   background: var(--bg-2);
   color: var(--ink-soft);
   border: 1px solid var(--line);
+  min-width: 70px;
+  text-align: center;
+  letter-spacing: 0.5px;
 }
 
 .clock.active-clock {
-  background: var(--accent);
-  color: #1a1410;
-  border-color: var(--accent);
+  background: var(--olive-bright);
+  color: #14200a;
+  border-color: var(--olive-bright);
 }
 
 /* Chess board */
@@ -508,8 +514,8 @@ body {
 .square.light { background: #eeeed2; }
 .square.dark  { background: #769656; }
 
-.square.selected { box-shadow: inset 0 0 0 3px var(--accent); }
-.square.last-move { background-image: linear-gradient(rgba(201, 161, 95, 0.35), rgba(201, 161, 95, 0.35)); }
+.square.selected { box-shadow: inset 0 0 0 3px var(--olive-bright); }
+.square.last-move { background-image: linear-gradient(rgba(155, 201, 108, 0.35), rgba(155, 201, 108, 0.35)); }
 
 .piece {
   font-family: 'Segoe UI Symbol', 'Noto Sans Symbols 2', serif;
@@ -521,13 +527,13 @@ body {
 }
 
 .piece.white {
-  color: #fffdf5;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 1px 0 rgba(0, 0, 0, 0.5), -1px 0 rgba(0, 0, 0, 0.5), 0 -1px rgba(0, 0, 0, 0.5);
+  color: #fffdf4;
+  text-shadow: 0 1px 1px #35352b, 1px 0 #35352b, -1px 0 #35352b, 0 -1px #35352b;
 }
 
 .piece.black {
-  color: #1f1a14;
-  text-shadow: 0 1px 0 rgba(240, 230, 210, 0.5);
+  color: #252821;
+  text-shadow: 0 1px 0 #f5f2df;
 }
 
 .square .dot {
@@ -535,7 +541,7 @@ body {
   width: 22%;
   height: 22%;
   border-radius: 50%;
-  background: rgba(26, 20, 16, 0.35);
+  background: rgba(32, 45, 30, 0.4);
   z-index: 3;
 }
 
@@ -543,7 +549,7 @@ body {
   position: absolute;
   inset: 5%;
   border-radius: 50%;
-  border: 3px solid rgba(26, 20, 16, 0.4);
+  border: 3px solid rgba(32, 45, 30, 0.45);
   z-index: 3;
 }
 
@@ -559,7 +565,7 @@ body {
 .square .coord.rank { top: 3px; left: 3px; }
 .square .coord.file { bottom: 3px; right: 3px; }
 .square.light .coord { color: #7a6549; }
-.square.dark .coord { color: #f0e6d2; }
+.square.dark .coord { color: #eeeed2; }
 
 .board-footer {
   display: flex;
@@ -581,7 +587,7 @@ body {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--olive);
 }
 
 /* Side panel */
@@ -616,9 +622,9 @@ body {
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 1px;
-  color: var(--accent);
-  background: rgba(201, 161, 95, 0.1);
-  border: 1px solid rgba(201, 161, 95, 0.3);
+  color: var(--olive);
+  background: rgba(155, 201, 108, 0.12);
+  border: 1px solid rgba(155, 201, 108, 0.3);
   padding: 4px 8px;
   border-radius: 5px;
 }
@@ -663,7 +669,7 @@ body {
   font-size: 20px;
   font-weight: 800;
   letter-spacing: 4px;
-  color: var(--accent);
+  color: var(--olive);
 }
 
 .moves-panel .panel-head h3 {
@@ -700,7 +706,7 @@ body {
 }
 
 .move-pair:nth-child(even) {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(155, 201, 108, 0.03);
 }
 
 .move-no {
@@ -715,7 +721,7 @@ body {
   font-family: var(--font-mono);
 }
 
-.move-san.latest { color: var(--accent); }
+.move-san.latest { color: var(--olive); }
 
 .captured-panel .label {
   display: block;
@@ -768,7 +774,7 @@ body {
   min-height: 16px;
   text-align: center;
   font-size: 12px;
-  color: var(--accent);
+  color: var(--olive);
   margin-top: 6px;
 }
 
@@ -822,9 +828,9 @@ body {
 }
 
 .promo-piece:hover {
-  background: var(--accent);
-  color: #1a1410;
-  border-color: var(--accent);
+  background: var(--olive);
+  color: #14200a;
+  border-color: var(--olive);
 }
 
 .cancel-promo { width: 100%; }
@@ -858,7 +864,7 @@ body {
   .avatar { width: 28px; height: 28px; font-size: 17px; }
   .player-info strong { font-size: 11px; }
   .player-info span { font-size: 9px; }
-  .clock { font-size: 12px; padding: 4px 8px; }
+  .clock { font-size: 12px; padding: 4px 8px; min-width: 60px; }
 
   .piece { font-size: clamp(24px, 10vw, 40px); }
 
@@ -895,47 +901,8 @@ body {
   .captured-panel, .action-row { grid-column: 1; }
 }
 
-/* Wide screens: give the board a bit more breathing room */
 @media (min-width: 1000px) {
   .board-panel { padding: 16px; }
   .board-frame { border-width: 4px; }
   .side-panel { position: sticky; top: 76px; }
-}
-
-/* Ensure clock is always visible */
-.clock {
-  min-width: 70px;
-  text-align: center;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-weight: 700;
-  font-size: 14px;
-  letter-spacing: 0.5px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  background: var(--surface-2, #26221d);
-  color: var(--ink-soft, #b8afa0);
-  border: 1px solid var(--line, #302b24);
-}
-.clock.active-clock {
-  background: var(--accent, #c9a15f);
-  color: #1a1410;
-  border-color: var(--accent, #c9a15f);
-}
-
-/* Restore olive/green board colors (nicer than the cream/brown) */
-.square.light { background: #eeeed2 !important; }
-.square.dark  { background: #769656 !important; }
-.square.selected { box-shadow: inset 0 0 0 4px #f6f669 !important; }
-.square.last-move { background-image: linear-gradient(#f6f66980, #f6f66980) !important; }
-.square .dot { background: #202d1e70 !important; }
-.square .capture-ring { border-color: #202d1e80 !important; }
-
-/* Piece shadows on the green board */
-.piece.white {
-  color: #fffdf4;
-  text-shadow: 0 1px 1px #35352b, 1px 0 #35352b, -1px 0 #35352b, 0 -1px #35352b;
-}
-.piece.black {
-  color: #252821;
-  text-shadow: 0 1px 0 #f5f2df;
 }
