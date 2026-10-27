@@ -10,8 +10,8 @@
     .tab{padding:10px 18px;border-radius:10px;background:var(--surface);border:1px solid var(--line);cursor:pointer;font-weight:700;font-size:13px;color:var(--ink-soft)}
     .tab.active{background:var(--olive);color:#14200a;border-color:var(--olive)}
     .table-wrap{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow-x:auto}
-    .table-head{display:grid;grid-template-columns:60px 1fr 1fr 70px 50px 100px;gap:8px;padding:10px 14px;background:var(--bg-2);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase}
-    .game-row{display:grid;grid-template-columns:60px 1fr 1fr 70px 50px 100px;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);font-size:12px;align-items:center;position:relative;padding-right:44px}
+    .table-head{display:grid;grid-template-columns:60px 1fr 1fr 70px 50px 100px 32px;gap:8px;padding:10px 12px;background:var(--bg-2);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase}
+    .game-row{display:grid;grid-template-columns:60px 1fr 1fr 70px 50px 100px 32px;gap:8px;padding:12px 12px;border-bottom:1px solid var(--line);font-size:12px;align-items:center}
     .game-row:last-child{border-bottom:none}
     .game-row.clickable{cursor:pointer;transition:background .15s}
     .game-row.clickable:hover{background:rgba(155,201,108,.05)}
@@ -51,7 +51,7 @@
       <div id="liveBody"><div class="empty">Loading...</div></div>
     </div>
     <div id="history" class="table-wrap hidden">
-      <div class="table-head"><span>Code</span><span>White</span><span>Black</span><span>Winner</span><span>Time</span><span>Date</span></div>
+      <div class="table-head"><span>Code</span><span>White</span><span>Black</span><span>Winner</span><span>Time</span><span>Date</span><span></span></div>
       <div id="historyBody"><div class="empty">Loading...</div></div>
     </div>
   </main>
@@ -107,8 +107,8 @@
               <span class="winner ${cls}">${label}</span>
               <span>${fmt(g.duration_seconds)}</span>
               <span class="date">${fmtDate(g.started_at)}</span>
-              <span style="position:absolute;right:8px;top:50%;transform:translateY(-50%)">
-                <button onclick="event.stopPropagation();deleteGame(${g.id})" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:3px 7px;border-radius:5px;cursor:pointer;font-size:11px">🗑</button>
+              <span style="text-align:center">
+                <button onclick="event.stopPropagation();deleteGame(${g.id})" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:3px 6px;border-radius:5px;cursor:pointer;font-size:11px">🗑</button>
               </span>
             </div>
             
