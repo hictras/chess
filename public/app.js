@@ -2,8 +2,18 @@
   const $ = id => document.getElementById(id);
   const socket = io();
   const PIECES = {
-    wk:"♔", wq:"♕", wr:"♖", wb:"♗", wn:"♘", wp:"♙",
-    bk:"♚", bq:"♛", br:"♜", bb:"♝", bn:"♞", bp:"♟"
+    wk: "/pieces/cburnett/wK.svg",
+    wq: "/pieces/cburnett/wQ.svg",
+    wr: "/pieces/cburnett/wR.svg",
+    wb: "/pieces/cburnett/wB.svg",
+    wn: "/pieces/cburnett/wN.svg",
+    wp: "/pieces/cburnett/wP.svg",
+    bk: "/pieces/cburnett/bK.svg",
+    bq: "/pieces/cburnett/bQ.svg",
+    br: "/pieces/cburnett/bR.svg",
+    bb: "/pieces/cburnett/bB.svg",
+    bn: "/pieces/cburnett/bN.svg",
+    bp: "/pieces/cburnett/bP.svg",
   };
   const state = {
     code: null, color: null, token: sessionStorage.getItem("chessPlayerToken") || null,
@@ -123,7 +133,7 @@
         if (piece) {
           const span = document.createElement("span");
           span.className = "piece " + (piece.color === "w" ? "white" : "black");
-          span.textContent = PIECES[piece.color + piece.type];
+          span.innerHTML = `<img src="${PIECES[piece.color + piece.type]}" alt="" style="width:100%;height:100%;object-fit:contain;pointer-events:none" />`;
           btn.appendChild(span);
         }
         if (state.legalTargets.includes(square)) {

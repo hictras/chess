@@ -28,7 +28,8 @@
       .player-side{flex-direction:row;justify-content:space-between;padding:8px 12px}
       .player-side .name{text-align:left;font-size:12px}
     }
-  </style>
+    }
+    </style>
 </head>
 <body>
   <header class="topbar">
@@ -88,7 +89,20 @@
   <script src="/chess.min.js"></script>
   <script>
     const $ = id => document.getElementById(id);
-    const PIECES = { wk:"♔",wq:"♕",wr:"♖",wb:"♗",wn:"♘",wp:"♙",bk:"♚",bq:"♛",br:"♜",bb:"♝",bn:"♞",bp:"♟" };
+    const PIECES = {
+    wk: "/pieces/cburnett/wK.svg",
+    wq: "/pieces/cburnett/wQ.svg",
+    wr: "/pieces/cburnett/wR.svg",
+    wb: "/pieces/cburnett/wB.svg",
+    wn: "/pieces/cburnett/wN.svg",
+    wp: "/pieces/cburnett/wP.svg",
+    bk: "/pieces/cburnett/bK.svg",
+    bq: "/pieces/cburnett/bQ.svg",
+    br: "/pieces/cburnett/bR.svg",
+    bb: "/pieces/cburnett/bB.svg",
+    bn: "/pieces/cburnett/bN.svg",
+    bp: "/pieces/cburnett/bP.svg",
+  };
     const params = new URLSearchParams(window.location.search);
     const id = params.get("id");
     let moves = [];
@@ -96,8 +110,12 @@
     let currentStep = 0;
     let playing = false;
     let playTimer = null;
+    let tickTimer = null;
+    let liveWUsed = 0;
+    let liveBUsed = 0;
     let speedMode = 'realtime';
     let gameMeta = null;
+    let lastMoveSquares = { from: null, to: null };
 
     function fmtMoveTime(ms) {
       if (typeof ms !== "number" || ms < 0) return "";
@@ -120,6 +138,7 @@
     }
 
     function renderBoardFromFen(fen) {
+      const lm = computeLastMove(currentStep);
       const g = new Chess(fen);
       const boardEl = $("board");
       boardEl.innerHTML = "";
@@ -135,15 +154,26 @@
           const light = ((f + (8-r)) % 2 === 0);
           const cell = document.createElement("div");
           cell.className = "square " + (light ? "light" : "dark");
+          if (sq === lm.from || sq === lm.to) cell.classList.add("replay-last-move");
           if (piece) {
             const span = document.createElement("span");
             span.className = "piece " + (piece.color === "w" ? "white" : "black");
-            span.textContent = PIECES[piece.color + piece.type];
+            span.innerHTML = `<img src="${PIECES[piece.color + piece.type]}" alt="" style="width:100%;height:100%;object-fit:contain;pointer-events:none" />`;
             cell.appendChild(span);
           }
           boardEl.appendChild(cell);
         }
       }
+    }
+
+    function computeLastMove(step) {
+      if (step === 0 || moveTimes.length === 0) return { from: null, to: null };
+      const g = new Chess();
+      let last = null;
+      for (let i = 0; i < step; i++) {
+        try { last = g.move(moves[i]); } catch(e) { break; }
+      }
+      return { from: last ? last.from : null, to: last ? last.to : null };
     }
 
     function computeFenAtStep(step) {
@@ -154,14 +184,50 @@
       return g.fen();
     }
 
+    function computeExactUsed() {
+      let wUsed = 0;
+      let bUsed = 0;
+      for (let i = 0; i < currentStep; i++) {
+        const prev = i > 0 ? moveTimes[i - 1] : 0;
+        const now = moveTimes[i];
+        if (typeof now !== "number") return { wUsed, bUsed };
+        const spent = Math.max(0, (now - prev) / 1000);
+        if (i % 2 === 0) wUsed += spent;
+        else bUsed += spent;
+      }
+      return { wUsed, bUsed };
+    }
+
+    function paintClocks() {
+      const whiteRemaining = Math.max(0, 600 - liveWUsed);
+      const blackRemaining = Math.max(0, 600 - liveBUsed);
+      $("whiteClock").textContent = fmtClock(Math.round(whiteRemaining));
+      $("blackClock").textContent = fmtClock(Math.round(blackRemaining));
+    }
+
     function updateClocks() {
       if (!gameMeta) return;
-      // Show clocks as they would be at current step
-      // Decrease the side whose clock ran during the move
-      let wTime = gameMeta.time_white;
-      let bTime = gameMeta.time_black;
-      $("whiteClock").textContent = fmtClock(wTime);
-      $("blackClock").textContent = fmtClock(bTime);
+      const ex = computeExactUsed();
+      liveWUsed = ex.wUsed;
+      liveBUsed = ex.bUsed;
+      paintClocks();
+    }
+
+    function startTicker() {
+      stopTicker();
+      tickTimer = setInterval(() => {
+        // Who is on the clock? Next move's color.
+        // currentStep = number of moves already played. Next move index = currentStep.
+        // Even index = white's move (white on clock). Odd = black on clock.
+        if (currentStep >= moves.length) return;
+        if (currentStep % 2 === 0) liveWUsed += 1;
+        else liveBUsed += 1;
+        paintClocks();
+      }, 1000);
+    }
+
+    function stopTicker() {
+      if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
     }
 
     function render() {
@@ -182,6 +248,10 @@
       rows.forEach((el, i) => {
         el.style.background = i === activeRow ? "rgba(155,201,108,.15)" : "";
       });
+      if (playing) {
+        updateClocks();
+        startTicker();
+      }
     }
 
     function renderMoveList() {
@@ -216,11 +286,14 @@
         clearTimeout(playTimer);
         playing = false;
         $("playBtn").textContent = "▶ Play";
+        stopTicker();
         return;
       }
       if (currentStep >= moves.length) currentStep = 0;
       playing = true;
       $("playBtn").textContent = "⏸ Pause";
+      updateClocks();
+      startTicker();
       scheduleNext();
     }
 
@@ -229,6 +302,7 @@
       if (currentStep >= moves.length) {
         playing = false;
         $("playBtn").textContent = "▶ Play";
+        stopTicker();
         return;
       }
       let delay;
