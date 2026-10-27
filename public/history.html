@@ -148,7 +148,7 @@
       const el = document.getElementById('moves-'+i);
       if(el) el.classList.toggle('hidden');
     }
-    async async function deleteGame(id) {
+    async function deleteGame(id) {
       var ok = await cModal({ title: document.cookie.includes('lang=ar') ? 'حذف المباراة' : 'Delete Game', message: document.cookie.includes('lang=ar') ? 'هل تريد حذف هذه المباراة من السجل؟' : 'Delete this game from history?', okText: document.cookie.includes('lang=ar') ? 'حذف' : 'Delete', danger: true });
       if (!ok) return;
       try {
@@ -156,7 +156,7 @@
         if (r.ok) { loadHistory(); } else { await cModal({ title: document.cookie.includes('lang=ar') ? 'خطأ' : 'Error', message: document.cookie.includes('lang=ar') ? 'فشل الحذف' : 'Delete failed', confirmOnly: true }); }
       } catch(e) { await cModal({ title: document.cookie.includes('lang=ar') ? 'خطأ' : 'Error', message: document.cookie.includes('lang=ar') ? 'فشل الحذف' : 'Delete failed', confirmOnly: true }); }
     }
-    async async function clearAll() {
+    async function clearAll() {
       var ok = await cModal({ title: document.cookie.includes('lang=ar') ? 'حذف الكل' : 'Delete All', message: document.cookie.includes('lang=ar') ? 'هل تريد حذف كل سجل المباريات؟ لا يمكن التراجع عن هذا الإجراء.' : 'Delete ALL game history? This cannot be undone.', okText: document.cookie.includes('lang=ar') ? 'حذف الكل' : 'Delete All', danger: true });
       if (!ok) return;
       try {
