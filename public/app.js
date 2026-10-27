@@ -6,7 +6,7 @@
     bk:"♚", bq:"♛", br:"♜", bb:"♝", bn:"♞", bp:"♟"
   };
   const state = {
-    code: null, color: null, token: localStorage.getItem("chessPlayerToken") || null,
+    code: null, color: null, token: sessionStorage.getItem("chessPlayerToken") || null,
     game: null, flipped: false, selected: null, legalTargets: [], lastMove: null,
     latestState: null, pendingPromotion: null, noticeTimer: null
   };
@@ -51,13 +51,13 @@
   function persistSession() {
     if (state.code && state.token) {
       sessionStorage.setItem("chessRoomCode", state.code);
-      localStorage.setItem("chessPlayerToken", state.token);
+      sessionStorage.setItem("chessPlayerToken", state.token);
     }
   }
   function createRoom() {
     if (!socket.connected) return lobbyError("Connecting to the game server. Please try again in a moment.");
     lobbyError("");
-    state.token = localStorage.getItem("chessPlayerToken") || null;
+    state.token = sessionStorage.getItem("chessPlayerToken") || null;
     socket.emit("createRoom", { name: safeName(), token: state.token });
   }
   function joinRoom() {
@@ -65,7 +65,7 @@
     const code = $("roomCode").value.trim().toUpperCase();
     if (!/^[A-Z0-9]{6}$/.test(code)) return lobbyError("Enter the 6-character room code.");
     lobbyError("");
-    socket.emit("joinRoom", { code, name: safeName(), token: localStorage.getItem("chessPlayerToken") || null });
+    socket.emit("joinRoom", { code, name: safeName(), token: sessionStorage.getItem("chessPlayerToken") || null });
   }
   function getLegalTargets(square) {
     if (!state.game) return [];
@@ -284,7 +284,7 @@
     $("connectionText").textContent = "Connected";
     document.querySelector(".live-dot").classList.add("connected");
     const savedCode = sessionStorage.getItem("chessRoomCode");
-    const token = localStorage.getItem("chessPlayerToken");
+    const token = sessionStorage.getItem("chessPlayerToken");
     if (savedCode && token && !state.code) socket.emit("reconnectRoom", { code: savedCode, token });
   });
   socket.on("disconnect", () => {

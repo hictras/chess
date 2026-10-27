@@ -9,7 +9,7 @@ A responsive, real-time chess game for two devices. Node.js + Express + Socket.I
 - White/Black assignment, player names, move list, captured pieces
 - Legal move highlighting, check/checkmate/stalemate/draw handling
 - Flip board for Black, resign, offer draw, rematch request
-- Reconnection to the same room using a browser-stored player token (while the server process/room remains alive)
+- Reconnection to the same room using a per-tab session-stored player token (while the server process/room remains alive)
 - Render health endpoint at `/health`
 
 ## Run locally
