@@ -6,11 +6,38 @@ const { Server } = require("socket.io");
 const { Chess } = require("chess.js");
 require("dotenv").config({ path: ".env.local" });
 
-const { createClient } = require("@libsql/client");
-const db = createClient({
-  url: process.env.TURSO_DATABASE_URL || process.env.DATABASE_URL,
-  authToken: process.env.TURSO_AUTH_TOKEN || process.env.DATABASE_AUTH_TOKEN
-});
+let db = null;
+try {
+  const { createClient } = require("@libsql/client");
+  const dbUrl = process.env.TURSO_DATABASE_URL || process.env.DATABASE_URL;
+  const dbToken = process.env.TURSO_AUTH_TOKEN || process.env.DATABASE_AUTH_TOKEN;
+  if (dbUrl) {
+    db = createClient({ url: dbUrl, authToken: dbToken });
+    console.log("✅ Turso DB client ready");
+    db.execute(`
+      CREATE TABLE IF NOT EXISTS chess_games (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL,
+        player_white TEXT NOT NULL,
+        player_black TEXT,
+        winner TEXT,
+        result TEXT,
+        moves TEXT,
+        duration_seconds INTEGER,
+        time_white INTEGER,
+        time_black INTEGER,
+        started_at TEXT,
+        ended_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `)
+      .then(() => console.log("✅ chess_games table ready"))
+      .catch(err => console.log("chess_games auto-create:", err.message));
+  } else {
+    console.log("⚠️  No TURSO_DATABASE_URL set — history disabled");
+  }
+} catch (e) {
+  console.log("⚠️  DB init failed:", e.message);
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -23,32 +50,12 @@ const PORT = process.env.PORT || 3000;
 const rooms = new Map();
 global.rooms = rooms;
 
-// Auto-create the chess_games table on startup
-db.execute(`
-  CREATE TABLE IF NOT EXISTS chess_games (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    code TEXT NOT NULL,
-    player_white TEXT NOT NULL,
-    player_black TEXT,
-    winner TEXT,
-    result TEXT,
-    moves TEXT,
-    duration_seconds INTEGER,
-    time_white INTEGER,
-    time_black INTEGER,
-    started_at TEXT,
-    ended_at TEXT DEFAULT CURRENT_TIMESTAMP
-  )
-`)
-  .then(() => console.log("✅ chess_games table ready"))
-  .catch(err => console.log("chess_games auto-create:", err.message));
-
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/health", (_req, res) => res.status(200).json({ ok: true, rooms: rooms.size }));
 
-// GET /api/games?limit=50 — finished games
 app.get("/api/games", async (req, res) => {
+  if (!db) return res.json({ games: [], note: "DB not configured" });
   try {
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const rows = await db.execute({
@@ -61,7 +68,6 @@ app.get("/api/games", async (req, res) => {
   }
 });
 
-// GET /api/games/live — active rooms
 app.get("/api/games/live", (_req, res) => {
   try {
     const active = [];
@@ -85,7 +91,6 @@ app.get("/api/games/live", (_req, res) => {
   }
 });
 
-// SPA fallback
 app.get(/.*/, (_req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 
 function cleanName(value) {
@@ -154,8 +159,8 @@ function sendError(socket, message) {
   socket.emit("gameError", message);
 }
 
-// Save a finished game to chess_games
 async function saveGameRecord(room) {
+  if (!db) return;
   try {
     const startedAt = room.createdAt ? new Date(room.createdAt).toISOString() : null;
     const history = room.game.history({ verbose: true }).map(m => m.san).join(" ");
@@ -229,17 +234,6 @@ io.on("connection", socket => {
     return sendError(socket, "This room already has two players.");
   });
 
-  socket.on("spectate", ({ code } = {}) => {
-    code = String(code || "").trim().toUpperCase();
-    const room = rooms.get(code);
-    if (!room) return sendError(socket, "Room not found.");
-    socket.join(room.code);
-    socket.data.roomCode = room.code;
-    socket.data.isSpectator = true;
-    socket.emit("spectating", { code: room.code, state: publicState(room) });
-    console.log("Spectator joined:", room.code);
-  });
-
   socket.on("reconnectRoom", ({ code, token } = {}) => {
     code = String(code || "").trim().toUpperCase();
     const room = rooms.get(code);
@@ -250,6 +244,16 @@ io.on("connection", socket => {
       }
     }
     sendError(socket, "This player session was not found in that room.");
+  });
+
+  socket.on("spectate", ({ code } = {}) => {
+    code = String(code || "").trim().toUpperCase();
+    const room = rooms.get(code);
+    if (!room) return sendError(socket, "Room not found.");
+    socket.join(room.code);
+    socket.data.roomCode = room.code;
+    socket.data.isSpectator = true;
+    socket.emit("spectating", { code: room.code, state: publicState(room) });
   });
 
   socket.on("move", ({ from, to, promotion } = {}) => {
@@ -333,7 +337,6 @@ io.on("connection", socket => {
   });
 });
 
-// Remove empty rooms older than 6 hours
 setInterval(() => {
   const cutoff = Date.now() - 6 * 60 * 60 * 1000;
   for (const [code, room] of rooms) {
@@ -342,7 +345,6 @@ setInterval(() => {
   }
 }, 30 * 60 * 1000).unref();
 
-// Global clock
 setInterval(() => {
   const now = Date.now();
   for (const room of rooms.values()) {
