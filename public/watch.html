@@ -96,6 +96,20 @@
     const params = new URLSearchParams(window.location.search);
     const code = (params.get("code") || "").toUpperCase();
     const $ = id => document.getElementById(id);
+    function cModal({ title, message, okText, cancelText, danger = false }) {
+      const isAr = document.cookie.split('; ').some(c => c === 'lang=ar');
+      const bg = document.createElement("div");
+      bg.className = "chess-modal-backdrop open";
+      bg.innerHTML = '<div class="chess-modal" dir="' + (isAr ? 'rtl' : 'ltr') + '"><h3>' + (title || (isAr ? 'تأكيد' : 'Confirm')) + '</h3><p>' + (message || '') + '</p><div class="chess-modal-actions">' + (cancelText !== null ? '<button class="chess-modal-btn" data-action="cancel">' + (cancelText || (isAr ? 'إلغاء' : 'Cancel')) + '</button>' : '') + '<button class="chess-modal-btn ' + (danger ? 'danger' : 'primary') + '" data-action="ok">' + (okText || (isAr ? 'موافق' : 'OK')) + '</button></div></div>';
+      document.body.appendChild(bg);
+      return new Promise(function(resolve) {
+        bg.addEventListener('click', function(e) {
+          var btn = e.target.closest('[data-action]');
+          if (btn) { bg.remove(); resolve(btn.dataset.action === 'ok'); }
+          else if (e.target === bg) { bg.remove(); resolve(false); }
+        });
+      });
+    }
     const socket = io();
     const PIECES = {
     wk: "/pieces/cburnett/wK.svg",

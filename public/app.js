@@ -1,6 +1,27 @@
 (() => {
   const $ = id => document.getElementById(id);
   const socket = io();
+
+  function cModal({ title, message, okText, cancelText, danger = false }) {
+    const isAr = document.cookie.split('; ').some(c => c === 'lang=ar');
+    const bg = document.createElement("div");
+    bg.className = "chess-modal-backdrop open";
+    bg.innerHTML = '<div class="chess-modal" dir="' + (isAr ? 'rtl' : 'ltr') + '">' +
+      '<h3>' + (title || (isAr ? 'تأكيد' : 'Confirm')) + '</h3>' +
+      '<p>' + (message || '') + '</p>' +
+      '<div class="chess-modal-actions">' +
+      '<button class="chess-modal-btn" data-action="cancel">' + (cancelText || (isAr ? 'إلغاء' : 'Cancel')) + '</button>' +
+      '<button class="chess-modal-btn ' + (danger ? 'danger' : 'primary') + '" data-action="ok">' + (okText || (isAr ? 'موافق' : 'OK')) + '</button>' +
+      '</div></div>';
+    document.body.appendChild(bg);
+    return new Promise(function(resolve) {
+      bg.addEventListener('click', function(e) {
+        var btn = e.target.closest('[data-action]');
+        if (btn) { bg.remove(); resolve(btn.dataset.action === 'ok'); }
+        else if (e.target === bg) { bg.remove(); resolve(false); }
+      });
+    });
+  }
   const PIECES = {
     wk: "/pieces/cburnett/wK.svg",
     wq: "/pieces/cburnett/wQ.svg",
@@ -294,15 +315,29 @@
   $("copyCodeBtn").addEventListener("click", copyCode);
   $("copyInviteBtn").addEventListener("click", copyCode);
   $("flipBtn").addEventListener("click", () => { state.flipped = !state.flipped; renderBoard(); });
-  $("leaveBtn").addEventListener("click", () => {
-    if (confirm("Leave this match? You can rejoin with the room code while the room is available.")) {
+  $("leaveBtn").addEventListener("click", async () => {
+    const isAr = document.cookie.split('; ').some(c => c === 'lang=ar');
+    const ok = await cModal({
+      title: isAr ? 'مغادرة المباراة' : 'Leave Game',
+      message: isAr ? 'مغادرة هذه المباراة؟ يمكنك العودة بالرمز.' : 'Leave this match? You can rejoin with the room code while the room is available.',
+      okText: isAr ? 'مغادرة' : 'Leave',
+      danger: true
+    });
+    if (ok) {
       sessionStorage.removeItem("chessRoomCode");
       showLobby();
     }
   });
   $("drawBtn").addEventListener("click", () => socket.emit("offerDraw"));
-  $("resignBtn").addEventListener("click", () => {
-    if (confirm("Are you sure you want to resign this game?")) socket.emit("resign");
+  $("resignBtn").addEventListener("click", async () => {
+    const isAr = document.cookie.split('; ').some(c => c === 'lang=ar');
+    const ok = await cModal({
+      title: isAr ? 'الاستسلام' : 'Resign',
+      message: isAr ? 'هل تريد الاستسلام؟ ستفقد هذه المباراة.' : 'Are you sure you want to resign this game?',
+      okText: isAr ? 'استسلم' : 'Resign',
+      danger: true
+    });
+    if (ok) socket.emit("resign");
   });
   $("rematchBtn").addEventListener("click", () => socket.emit("rematch"));
   promotionDialog.querySelectorAll(".promo-piece").forEach(button => {

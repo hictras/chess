@@ -978,3 +978,78 @@ body.embedded .top-status .live-dot {
   object-fit: contain;
   display: block;
 }
+
+/* ============ CHESS MODAL ============ */
+.chess-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.chess-modal-backdrop.open { display: flex; }
+
+.chess-modal {
+  background: var(--surface, #1f1c18);
+  border: 1px solid var(--line, #302b24);
+  border-radius: 16px;
+  max-width: 380px;
+  width: 100%;
+  padding: 24px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  animation: chessModalIn 0.2s ease;
+}
+@keyframes chessModalIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.chess-modal h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--ink, #f2ecdf);
+}
+.chess-modal p {
+  margin: 0 0 20px;
+  font-size: 14px;
+  color: var(--ink-soft, #b8afa0);
+  line-height: 1.5;
+}
+
+.chess-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.chess-modal-btn {
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--line, #302b24);
+  background: var(--surface-2, #26221d);
+  color: var(--ink, #f2ecdf);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  min-width: 80px;
+}
+.chess-modal-btn:hover { filter: brightness(1.15); }
+.chess-modal-btn.primary {
+  background: var(--olive, #9bc96c);
+  color: #14200a;
+  border-color: var(--olive, #9bc96c);
+}
+.chess-modal-btn.danger {
+  background: rgba(224, 104, 79, 0.15);
+  color: #e0684f;
+  border-color: rgba(224, 104, 79, 0.4);
+}
+.chess-modal-btn.danger:hover { background: rgba(224, 104, 79, 0.25); }
+
+/* RTL support */
+.chess-modal[dir="rtl"] .chess-modal-actions { justify-content: flex-start; }
