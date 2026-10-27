@@ -10,8 +10,8 @@
     .tab{padding:10px 18px;border-radius:10px;background:var(--surface);border:1px solid var(--line);cursor:pointer;font-weight:700;font-size:13px;color:var(--ink-soft)}
     .tab.active{background:var(--olive);color:#14200a;border-color:var(--olive)}
     .table-wrap{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow-x:auto}
-    .table-head{display:grid;grid-template-columns:70px 1fr 1fr 90px 80px 70px;gap:10px;padding:10px 14px;background:var(--bg-2);font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase}
-    .game-row{display:grid;grid-template-columns:70px 1fr 1fr 90px 80px 70px;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);font-size:13px;align-items:center;position:relative;padding-right:50px}
+    .table-head{display:grid;grid-template-columns:60px 1fr 1fr 70px 50px 100px;gap:8px;padding:10px 14px;background:var(--bg-2);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase}
+    .game-row{display:grid;grid-template-columns:60px 1fr 1fr 70px 50px 100px;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);font-size:12px;align-items:center;position:relative;padding-right:44px}
     .game-row:last-child{border-bottom:none}
     .game-row.clickable{cursor:pointer;transition:background .15s}
     .game-row.clickable:hover{background:rgba(155,201,108,.05)}
@@ -34,7 +34,7 @@
 <body>
   <header class="topbar">
     <a href="/" class="brand"><span class="brand-mark">♞</span><span class="brand-name">CHESS</span></a>
-    <a href="/" class="btn-ghost-sm">← Back to Play</a>
+    
   </header>
   <main class="layout" style="max-width:980px">
     <div class="hero" style="margin-bottom:20px">
@@ -107,6 +107,9 @@
               <span class="winner ${cls}">${label}</span>
               <span>${fmt(g.duration_seconds)}</span>
               <span class="date">${fmtDate(g.started_at)}</span>
+              <span style="position:absolute;right:8px;top:50%;transform:translateY(-50%)">
+                <button onclick="event.stopPropagation();deleteGame(${g.id})" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:3px 7px;border-radius:5px;cursor:pointer;font-size:11px">🗑</button>
+              </span>
             </div>
             <div style="position:absolute;right:14px;top:50%;transform:translateY(-50%);">
               <button onclick="event.stopPropagation();deleteGame(${g.id})" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:2px 6px;border-radius:4px;cursor:pointer;font-size:11px">🗑</button>
