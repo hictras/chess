@@ -186,10 +186,18 @@
     $("selfCaption").textContent = state.color === "w" ? "Playing White" : "Playing Black";
     $("opponentName").textContent = opponent ? opponent.name : "Waiting for opponent";
     $("opponentCaption").textContent = opponent ? (opponent.connected ? "Connected" : "Reconnecting…") : "Share the room code to invite them";
-    $("selfClock").textContent = "—:—";
-    $("opponentClock").textContent = "—:—";
-    $("selfClock").classList.toggle("active-clock", s.turn === state.color && s.status === "playing");
-    $("opponentClock").classList.toggle("active-clock", s.turn === other && s.status === "playing");
+    const isMyTurn = s.turn === state.color && s.status === "playing";
+    const isTheirTurn = s.turn === other && s.status === "playing";
+    const fmt = (sec) => {
+      if (typeof sec !== "number") return "10:00";
+      const m = Math.floor(sec / 60);
+      const r = sec % 60;
+      return m + ":" + String(r).padStart(2, "0");
+    };
+    $("selfClock").textContent = fmt(s.timeLeft ? s.timeLeft[state.color] : 600);
+    $("opponentClock").textContent = fmt(s.timeLeft ? s.timeLeft[other] : 600);
+    $("selfClock").classList.toggle("active-clock", isMyTurn);
+    $("opponentClock").classList.toggle("active-clock", isTheirTurn);
     $("turnIndicator").innerHTML = '<i class="turn-dot"></i> ' + statusLine(s);
     const badge = $("statusBadge");
     badge.textContent = badgeText(s);
