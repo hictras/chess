@@ -183,6 +183,8 @@ function sendError(socket, message) {
 
 async function saveGameRecord(room) {
   if (!db) return;
+  if (room.saved) return;
+  room.saved = true;
   try {
     const startedAt = room.createdAt ? new Date(room.createdAt).toISOString() : null;
     const history = room.game.history({ verbose: true }).map(m => m.san).join(" ");
@@ -340,6 +342,9 @@ io.on("connection", socket => {
       room.timeLeft = { w: 600, b: 600 };
       room.lastTick = Date.now();
       room.createdAt = Date.now();
+      room.saved = false;
+      room.resigned = null;
+      room.drawAgreed = false;
       emitState(room);
       io.to(room.code).emit("notice", "New game started.");
     } else {
