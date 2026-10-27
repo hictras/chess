@@ -91,6 +91,19 @@ app.get("/api/games/live", (_req, res) => {
   }
 });
 
+app.get("/api/games/:id", async (req, res) => {
+  if (!db) return res.status(503).json({ error: "DB not configured" });
+  try {
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const r = await db.execute({ sql: "SELECT * FROM chess_games WHERE id = ?", args: [id] });
+    if (r.rows.length === 0) return res.status(404).json({ error: "Not found" });
+    res.json({ game: r.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete("/api/games/:id", async (req, res) => {
   if (!db) return res.status(503).json({ error: "DB not configured" });
   try {
@@ -199,7 +212,7 @@ async function saveGameRecord(room) {
     else if (room.game.isDraw()) { result = "draw"; }
 
     await db.execute({
-      sql: "INSERT INTO chess_games (code, player_white, player_black, winner, result, moves, duration_seconds, time_white, time_black, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      sql: "INSERT INTO chess_games (code, player_white, player_black, winner, result, moves, move_times, duration_seconds, time_white, time_black, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       args: [
         room.code,
         room.players.w?.name || "White",
@@ -207,6 +220,7 @@ async function saveGameRecord(room) {
         winner,
         result,
         history,
+        JSON.stringify(room.moveTimes || []),
         duration,
         room.timeLeft?.w ?? 0,
         room.timeLeft?.b ?? 0,
@@ -226,6 +240,7 @@ io.on("connection", socket => {
       code, game: new Chess(), drawOffer: null, rematch: { w: false, b: false },
       players: { w: null, b: null }, createdAt: Date.now(),
       timeLeft: { w: 600, b: 600 },
+      moveTimes: [],
       lastTick: Date.now()
     };
     room.players.w = {
@@ -289,6 +304,7 @@ io.on("connection", socket => {
     if (room.game.turn() !== color) return sendError(socket, "It is not your turn.");
     try {
       const move = room.game.move({ from, to, promotion: promotion || "q" });
+      room.moveTimes.push(Date.now() - room.createdAt);
       room.drawOffer = null;
       room.rematch = { w: false, b: false };
       io.to(room.code).emit("lastMove", { from: move.from, to: move.to, san: move.san });
@@ -340,6 +356,7 @@ io.on("connection", socket => {
       room.resigned = null;
       room.drawAgreed = false;
       room.timeLeft = { w: 600, b: 600 };
+      room.moveTimes = [];
       room.lastTick = Date.now();
       room.createdAt = Date.now();
       room.saved = false;
