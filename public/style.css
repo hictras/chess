@@ -505,8 +505,8 @@ body {
   transition: background .1s;
 }
 
-.square.light { background: #f0e6d2; }
-.square.dark  { background: #a68b64; }
+.square.light { background: #eeeed2; }
+.square.dark  { background: #769656; }
 
 .square.selected { box-shadow: inset 0 0 0 3px var(--accent); }
 .square.last-move { background-image: linear-gradient(rgba(201, 161, 95, 0.35), rgba(201, 161, 95, 0.35)); }
@@ -920,4 +920,22 @@ body {
   background: var(--accent, #c9a15f);
   color: #1a1410;
   border-color: var(--accent, #c9a15f);
+}
+
+/* Restore olive/green board colors (nicer than the cream/brown) */
+.square.light { background: #eeeed2 !important; }
+.square.dark  { background: #769656 !important; }
+.square.selected { box-shadow: inset 0 0 0 4px #f6f669 !important; }
+.square.last-move { background-image: linear-gradient(#f6f66980, #f6f66980) !important; }
+.square .dot { background: #202d1e70 !important; }
+.square .capture-ring { border-color: #202d1e80 !important; }
+
+/* Piece shadows on the green board */
+.piece.white {
+  color: #fffdf4;
+  text-shadow: 0 1px 1px #35352b, 1px 0 #35352b, -1px 0 #35352b, 0 -1px #35352b;
+}
+.piece.black {
+  color: #252821;
+  text-shadow: 0 1px 0 #f5f2df;
 }
