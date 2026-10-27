@@ -108,7 +108,15 @@ io.on("connection", socket => {
     }
     if (existingColor) return joinSocket(socket, room, existingColor, token);
     if (!room.players.w) return joinSocket(socket, room, "w", token);
-    if (!room.players.b) return joinSocket(socket, room, "b", token);
+    if (!room.players.b) {
+      room.players.b = {
+        name: cleanName(name),
+        token: token || crypto.randomUUID(),
+        socketId: null,
+        connected: false
+      };
+      return joinSocket(socket, room, "b", token);
+    }
     return sendError(socket, "This room already has two players.");
   });
 
