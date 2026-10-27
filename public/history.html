@@ -100,7 +100,7 @@
           const moves = (g.moves||'').trim();
           const moveCount = moves ? moves.split(/\s+/).length : 0;
           return `
-            <div class="game-row">
+            <div class="game-row" onclick="window.location.href='/replay.html?id=${g.id}'" style="cursor:pointer">
               <span class="code">${g.code}</span>
               <span>${g.player_white}</span>
               <span>${g.player_black}</span>

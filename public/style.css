@@ -926,15 +926,30 @@ body {
   text-shadow: 0 1px 2px rgba(0,0,0,0.7), 1px 0 rgba(0,0,0,0.7), -1px 0 rgba(0,0,0,0.7), 0 -1px rgba(0,0,0,0.7) !important;
 }
 
-/* Inside iframe: move status dot to the left, hide the text */
+
+/* When inside food menu iframe: keep only the status dot, hide the text */
+body.embedded .top-status #connectionText { display: none; }
+body.embedded .top-status .live-dot { margin: 0; }
+body.embedded .topbar { padding-right: 90px; }
+
+
+
+/* Inside iframe: status dot on left, no text */
 body.embedded .topbar {
-  justify-content: flex-start;
-  gap: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+body.embedded .brand {
+  flex-shrink: 0;
 }
 body.embedded .top-status {
-  order: -1;
-  margin-right: auto;
+  order: 0;
+  margin-left: 4px;
 }
 body.embedded .top-status #connectionText {
   display: none;
+}
+body.embedded .top-status .live-dot {
+  margin: 0;
 }
