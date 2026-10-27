@@ -15,7 +15,7 @@
 
   <header class="top">
     <a href="/" class="brand"><span class="logo">♞</span> <span>CHESS</span></a>
-    <span class="status"><i class="dot"></i><span id="connectionText">Connecting</span></span>
+    <span class="status"><i class="live-dot"></i><span id="connectionText">Connecting</span></span>
   </header>
 
   <main class="wrap">
@@ -123,17 +123,17 @@
     <form method="dialog">
       <h3>Promote to</h3>
       <div class="promo-row">
-        <button value="q" class="piece">♕</button>
-        <button value="r" class="piece">♖</button>
-        <button value="b" class="piece">♗</button>
-        <button value="n" class="piece">♘</button>
+        <button value="q" class="promo-piece">♕</button>
+        <button value="r" class="promo-piece">♖</button>
+        <button value="b" class="promo-piece">♗</button>
+        <button value="n" class="promo-piece">♘</button>
       </div>
-      <button value="cancel" class="ghost cancel">Cancel</button>
+      <button value="cancel" class="ghost cancel-promo">Cancel</button>
     </form>
   </dialog>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chess.js@0.13.4/chess.min.js"></script>
+  <script src="https://unpkg.com/chess.js@0.13.4/chess.min.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
