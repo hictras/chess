@@ -123,7 +123,7 @@
             span.textContent = PIECES[piece.color + piece.type];
             cell.appendChild(span);
           }
-          if (game.inCheck() && piece && piece.type === "k" && piece.color === game.turn()) {
+          if ((typeof game.inCheck === "function" ? game.inCheck() : game.in_check && game.in_check()) && piece && piece.type === "k" && piece.color === game.turn()) {
             cell.classList.add("checked-king");
           }
           boardEl.appendChild(cell);

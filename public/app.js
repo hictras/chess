@@ -77,7 +77,9 @@
   }
   function findCheckedKingSquare(game) {
     try {
-      if (!game || typeof game.inCheck !== "function" || !game.inCheck()) return null;
+      if (!game) return null;
+    var inChk = (typeof game.inCheck === "function") ? game.inCheck() : (game.in_check ? game.in_check() : false);
+    if (!inChk) return null;
       const turn = game.turn();
       const board = game.board();
       for (let r = 0; r < 8; r++) {
