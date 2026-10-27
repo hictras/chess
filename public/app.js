@@ -75,8 +75,26 @@
     const piece = state.game && state.game.get(square);
     return piece ? PIECES[piece.color + piece.type] : "";
   }
+  function findCheckedKingSquare(game) {
+    try {
+      if (!game || typeof game.inCheck !== "function" || !game.inCheck()) return null;
+      const turn = game.turn();
+      const board = game.board();
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          const sq = board[r][c];
+          if (sq && sq.type === "k" && sq.color === turn) {
+            return "abcdefgh"[c] + (8 - r);
+          }
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
   function renderBoard() {
     if (!state.game) return;
+    const checkedKingSquare = findCheckedKingSquare(state.game);
     boardEl.innerHTML = "";
     const files = state.flipped ? "hgfedcba" : "abcdefgh";
     const ranks = state.flipped ? "12345678" : "87654321";
@@ -99,6 +117,7 @@
         btn.setAttribute("aria-label", square + (piece ? " " + piece.color + " " + piece.type : ""));
         if (state.selected === square) btn.classList.add("selected");
         if (state.lastMove && (state.lastMove.from === square || state.lastMove.to === square)) btn.classList.add("last-move");
+        if (square === checkedKingSquare) btn.classList.add("checked-king");
         if (piece) {
           const span = document.createElement("span");
           span.className = "piece " + (piece.color === "w" ? "white" : "black");

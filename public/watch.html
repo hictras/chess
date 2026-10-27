@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess — Watching</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .watch-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: var(--danger);
+      background: rgba(224, 104, 79, 0.12);
+      padding: 4px 10px;
+      border-radius: 6px;
+      margin-bottom: 12px;
+    }
+    .watch-badge::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--danger);
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="brand"><span class="brand-mark">♞</span><span class="brand-name">CHESS</span></a>
+    <a href="/history.html" class="btn-ghost-sm">← Back to History</a>
+  </header>
+  <main class="layout">
+    <div class="watch-badge">🔴 WATCHING LIVE</div>
+    <div class="game-shell">
+      <div class="game-topline">
+        <div>
+          <span class="label">ROOM</span>
+          <div class="room-line"><strong id="roomCodeLabel">——</strong></div>
+        </div>
+        <span id="connStatus" class="btn-ghost-sm">Connecting...</span>
+      </div>
+      <div class="game-grid">
+        <section class="board-panel">
+          <div class="player-strip">
+            <div class="avatar">♟</div>
+            <div class="player-info">
+              <strong id="blackName">Black</strong>
+              <span id="blackTime">10:00</span>
+            </div>
+          </div>
+          <div class="board-frame">
+            <div id="board" class="board"></div>
+          </div>
+          <div class="player-strip self-strip">
+            <div class="avatar self-avatar">♞</div>
+            <div class="player-info">
+              <strong id="whiteName">White</strong>
+              <span id="whiteTime">10:00</span>
+            </div>
+          </div>
+          <div class="board-footer">
+            <span id="turnIndicator"><i class="turn-dot"></i> Waiting</span>
+          </div>
+        </section>
+        <aside class="side-panel">
+          <div class="panel">
+            <div class="panel-head">
+              <span class="label">MATCH STATUS</span>
+              <span id="statusBadge" class="status-badge">LIVE</span>
+            </div>
+            <h3 id="statusTitle">Game in progress</h3>
+            <p id="statusDescription">Watching in real time</p>
+          </div>
+          <div class="panel moves-panel">
+            <div class="panel-head">
+              <h3>Move history</h3>
+              <span id="moveCount">0 moves</span>
+            </div>
+            <div id="moveList" class="move-list">
+              <div class="empty-moves">No moves yet</div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </main>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/chess.min.js"></script>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const code = (params.get("code") || "").toUpperCase();
+    const $ = id => document.getElementById(id);
+    const socket = io();
+    const PIECES = { wk:"♔",wq:"♕",wr:"♖",wb:"♗",wn:"♘",wp:"♙",bk:"♚",bq:"♛",br:"♜",bb:"♝",bn:"♞",bp:"♟" };
+    let state = { game: null, color: "spectator" };
+
+    function renderBoard(game) {
+      const boardEl = $("board");
+      boardEl.innerHTML = "";
+      const fenRows = game.board();
+      const boardMap = {};
+      fenRows.forEach((row, ri) => row.forEach((p, fi) => {
+        if (p) boardMap["abcdefgh"[fi] + (8 - ri)] = p;
+      }));
+      for (let r = 0; r < 8; r++) {
+        for (let f = 0; f < 8; f++) {
+          const square = "abcdefgh"[f] + (8 - r);
+          const piece = boardMap[square];
+          const fileIndex = f;
+          const rank = 8 - r;
+          const light = (fileIndex + rank) % 2 === 0;
+          const cell = document.createElement("div");
+          cell.className = "square " + (light ? "light" : "dark");
+          if (piece) {
+            const span = document.createElement("span");
+            span.className = "piece " + (piece.color === "w" ? "white" : "black");
+            span.textContent = PIECES[piece.color + piece.type];
+            cell.appendChild(span);
+          }
+          if (game.inCheck() && piece && piece.type === "k" && piece.color === game.turn()) {
+            cell.classList.add("checked-king");
+          }
+          boardEl.appendChild(cell);
+        }
+      }
+    }
+
+    function renderHistory(history) {
+      const list = $("moveList");
+      list.innerHTML = "";
+      if (!history.length) {
+        list.innerHTML = '<div class="empty-moves">No moves yet</div>';
+      } else {
+        for (let i = 0; i < history.length; i += 2) {
+          const pair = document.createElement("div");
+          pair.className = "move-pair";
+          pair.innerHTML =
+            `<span class="move-no">${Math.floor(i/2)+1}.</span>` +
+            `<span class="move-san${i===history.length-1?' latest':''}">${history[i].san}</span>` +
+            `<span class="move-san${i+1===history.length-1?' latest':''}">${history[i+1]?.san || ''}</span>`;
+          list.appendChild(pair);
+        }
+        list.scrollTop = list.scrollHeight;
+      }
+      $("moveCount").textContent = history.length + " moves";
+    }
+
+    function fmt(sec) {
+      if (typeof sec !== "number") return "10:00";
+      return Math.floor(sec/60) + ":" + String(sec%60).padStart(2,"0");
+    }
+
+    function render(s) {
+      if (!s) return;
+      $("roomCodeLabel").textContent = s.code;
+      $("whiteName").textContent = s.players.w?.name || "White";
+      $("blackName").textContent = s.players.b?.name || "Black";
+      $("whiteTime").textContent = fmt(s.timeLeft?.w);
+      $("blackTime").textContent = fmt(s.timeLeft?.b);
+      try { state.game = new Chess(s.fen); } catch(e) { return; }
+      renderBoard(state.game);
+      renderHistory(s.history);
+      const turnLabel = s.turn === "w" ? "White to move" : "Black to move";
+      $("turnIndicator").innerHTML = '<i class="turn-dot"></i> ' + turnLabel;
+      $("statusTitle").textContent = s.status === "playing" ? (s.turn === "w" ? "White to move" : "Black to move") : s.status;
+      $("statusDescription").textContent = "Watching in real time";
+    }
+
+    socket.on("connect", () => {
+      $("connStatus").textContent = "Connected";
+      if (code) socket.emit("spectate", { code });
+    });
+    socket.on("spectating", ({ code: c, state: s }) => render(s));
+    socket.on("state", s => { if (s && s.code === code) render(s); });
+    socket.on("clock", ({ timeLeft }) => {
+      $("whiteTime").textContent = fmt(timeLeft.w);
+      $("blackTime").textContent = fmt(timeLeft.b);
+    });
+    socket.on("gameError", msg => { $("connStatus").textContent = msg; });
+  </script>
+</body>
+</html>

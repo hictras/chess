@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess — Live & History</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .tabs{display:flex;gap:8px;margin:20px 0}
+    .tab{padding:10px 18px;border-radius:10px;background:var(--surface);border:1px solid var(--line);cursor:pointer;font-weight:700;font-size:13px;color:var(--ink-soft)}
+    .tab.active{background:var(--olive);color:#14200a;border-color:var(--olive)}
+    .table-wrap{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+    .table-head{display:grid;grid-template-columns:70px 1fr 1fr 90px 80px 70px;gap:10px;padding:10px 14px;background:var(--bg-2);font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase}
+    .game-row{display:grid;grid-template-columns:70px 1fr 1fr 90px 80px 70px;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);font-size:13px;align-items:center}
+    .game-row:last-child{border-bottom:none}
+    .game-row.clickable{cursor:pointer;transition:background .15s}
+    .game-row.clickable:hover{background:rgba(155,201,108,.05)}
+    .game-row .code{font-family:var(--font-mono);color:var(--olive);font-weight:700}
+    .game-row .date{color:var(--muted);font-size:11px}
+    .winner{font-weight:700}
+    .winner.white{color:#fff}
+    .winner.black{color:var(--olive)}
+    .winner.draw{color:var(--muted)}
+    .live-badge{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:800;color:var(--danger);background:rgba(224,104,79,.12);padding:3px 8px;border-radius:5px}
+    .live-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--danger);animation:pulse 1.5s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+    .moves-btn{background:transparent;border:1px solid var(--line);color:var(--olive);font-size:10px;padding:4px 8px;border-radius:6px;cursor:pointer;font-weight:700}
+    .moves-btn:hover{background:rgba(155,201,108,.08)}
+    .moves-detail{grid-column:1/-1;padding:8px 14px 14px;font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);line-height:1.7;word-break:break-word;background:rgba(0,0,0,.15)}
+    .empty{text-align:center;padding:40px 20px;color:var(--muted);font-size:13px}
+    .hidden{display:none!important}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="brand"><span class="brand-mark">♞</span><span class="brand-name">CHESS</span></a>
+    <a href="/" class="btn-ghost-sm">← Back to Play</a>
+  </header>
+  <main class="layout" style="max-width:980px">
+    <div class="hero" style="margin-bottom:20px">
+      <span class="eyebrow">GAME RECORDS</span>
+      <h1 style="font-size:36px">Live &amp; History</h1>
+    </div>
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('live')">🔴 Live Games</button>
+      <button class="tab" onclick="switchTab('history')">📜 History</button>
+    </div>
+    <div id="live" class="table-wrap">
+      <div class="table-head"><span>Code</span><span>White</span><span>Black</span><span>Turn</span><span>Moves</span><span>Watch</span></div>
+      <div id="liveBody"><div class="empty">Loading...</div></div>
+    </div>
+    <div id="history" class="table-wrap hidden">
+      <div class="table-head"><span>Code</span><span>White</span><span>Black</span><span>Winner</span><span>Time</span><span>Date</span></div>
+      <div id="historyBody"><div class="empty">Loading...</div></div>
+    </div>
+  </main>
+  <script>
+    function switchTab(which){
+      document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById('live').classList.toggle('hidden',which!=='live');
+      document.getElementById('history').classList.toggle('hidden',which!=='history');
+    }
+    function fmt(sec){if(typeof sec!=='number')return '—';return Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0')}
+    function fmtDate(iso){
+      if(!iso)return '—';
+      try{
+        const d=new Date(iso);
+        return d.toLocaleDateString()+' '+d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      }catch(e){return '—'}
+    }
+    async function loadLive(){
+      try{
+        const res=await fetch('/api/games/live');const d=await res.json();
+        const b=document.getElementById('liveBody');
+        if(!d.live||d.live.length===0){b.innerHTML='<div class="empty">No live games right now.</div>';return}
+        b.innerHTML=d.live.map(g=>`
+          <div class="game-row clickable" onclick="window.location.href='/watch.html?code=${g.code}'">
+            <span class="code">${g.code}</span>
+            <span>${g.white}</span>
+            <span>${g.black}</span>
+            <span><span class="live-badge">${g.turn==='w'?'WHITE':'BLACK'}</span></span>
+            <span>${g.moves} moves</span>
+            <span>👁 Watch</span>
+          </div>`).join('');
+      }catch(e){document.getElementById('liveBody').innerHTML='<div class="empty">Failed to load.</div>'}
+    }
+    async function loadHistory(){
+      try{
+        const res=await fetch('/api/games?limit=50');const d=await res.json();
+        const b=document.getElementById('historyBody');
+        if(!d.games||d.games.length===0){b.innerHTML='<div class="empty">No games finished yet.</div>';return}
+        b.innerHTML=d.games.map((g,i)=>{
+          let label='—',cls='draw';
+          if(g.winner==='white'){label=g.player_white;cls='white'}
+          else if(g.winner==='black'){label=g.player_black;cls='black'}
+          else if(g.result==='draw'){label='Draw'}
+          const moves = (g.moves||'').trim();
+          const moveCount = moves ? moves.split(/\s+/).length : 0;
+          return `
+            <div class="game-row">
+              <span class="code">${g.code}</span>
+              <span>${g.player_white}</span>
+              <span>${g.player_black}</span>
+              <span class="winner ${cls}">${label}</span>
+              <span>${fmt(g.duration_seconds)}</span>
+              <span class="date">${fmtDate(g.started_at)}</span>
+            </div>
+            <div class="game-row" style="border-bottom:1px solid var(--line)">
+              <span style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:11px;color:var(--muted)">${moveCount} moves · ${g.result}</span>
+                ${moves ? `<button class="moves-btn" onclick="toggleMoves(${i})">Show moves</button>` : ''}
+              </span>
+            </div>
+            ${moves ? `<div id="moves-${i}" class="moves-detail hidden">${moves}</div>` : ''}
+          `;
+        }).join('');
+      }catch(e){document.getElementById('historyBody').innerHTML='<div class="empty">Failed to load.</div>'}
+    }
+    function toggleMoves(i){
+      const el = document.getElementById('moves-'+i);
+      if(el) el.classList.toggle('hidden');
+    }
+    loadLive();loadHistory();
+    setInterval(loadLive,5000);
+  </script>
+</body>
+</html>

@@ -4,6 +4,13 @@ const path = require("path");
 const crypto = require("crypto");
 const { Server } = require("socket.io");
 const { Chess } = require("chess.js");
+require("dotenv").config({ path: ".env.local" });
+
+const { createClient } = require("@libsql/client");
+const db = createClient({
+  url: process.env.TURSO_DATABASE_URL || process.env.DATABASE_URL,
+  authToken: process.env.TURSO_AUTH_TOKEN || process.env.DATABASE_AUTH_TOKEN
+});
 
 const app = express();
 const server = http.createServer(app);
@@ -14,9 +21,71 @@ const io = new Server(server, {
 });
 const PORT = process.env.PORT || 3000;
 const rooms = new Map();
+global.rooms = rooms;
+
+// Auto-create the chess_games table on startup
+db.execute(`
+  CREATE TABLE IF NOT EXISTS chess_games (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL,
+    player_white TEXT NOT NULL,
+    player_black TEXT,
+    winner TEXT,
+    result TEXT,
+    moves TEXT,
+    duration_seconds INTEGER,
+    time_white INTEGER,
+    time_black INTEGER,
+    started_at TEXT,
+    ended_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )
+`)
+  .then(() => console.log("✅ chess_games table ready"))
+  .catch(err => console.log("chess_games auto-create:", err.message));
 
 app.use(express.static(path.join(__dirname, "public")));
+
 app.get("/health", (_req, res) => res.status(200).json({ ok: true, rooms: rooms.size }));
+
+// GET /api/games?limit=50 — finished games
+app.get("/api/games", async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const rows = await db.execute({
+      sql: "SELECT * FROM chess_games ORDER BY id DESC LIMIT ?",
+      args: [limit]
+    });
+    res.json({ games: rows.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/games/live — active rooms
+app.get("/api/games/live", (_req, res) => {
+  try {
+    const active = [];
+    for (const room of rooms.values()) {
+      if (!room.players.w || !room.players.b) continue;
+      if (room.game.isGameOver()) continue;
+      active.push({
+        code: room.code,
+        white: room.players.w.name,
+        black: room.players.b.name,
+        turn: room.game.turn(),
+        moves: room.game.history().length,
+        timeWhite: room.timeLeft.w,
+        timeBlack: room.timeLeft.b,
+        lastMove: room.game.history({ verbose: true }).slice(-1)[0]?.san || null
+      });
+    }
+    res.json({ live: active });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// SPA fallback
 app.get(/.*/, (_req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 
 function cleanName(value) {
@@ -85,13 +154,49 @@ function sendError(socket, message) {
   socket.emit("gameError", message);
 }
 
+// Save a finished game to chess_games
+async function saveGameRecord(room) {
+  try {
+    const startedAt = room.createdAt ? new Date(room.createdAt).toISOString() : null;
+    const history = room.game.history({ verbose: true }).map(m => m.san).join(" ");
+    const duration = room.createdAt ? Math.floor((Date.now() - room.createdAt) / 1000) : 0;
+
+    let result = "unknown";
+    let winner = null;
+    if (room.drawAgreed) { result = "draw"; }
+    else if (room.resigned) { result = "resigned"; winner = room.resigned === "w" ? "black" : "white"; }
+    else if (room.game.isCheckmate()) { result = "checkmate"; winner = room.game.turn() === "w" ? "black" : "white"; }
+    else if (room.game.isStalemate()) { result = "stalemate"; }
+    else if (room.game.isDraw()) { result = "draw"; }
+
+    await db.execute({
+      sql: "INSERT INTO chess_games (code, player_white, player_black, winner, result, moves, duration_seconds, time_white, time_black, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      args: [
+        room.code,
+        room.players.w?.name || "White",
+        room.players.b?.name || "Black",
+        winner,
+        result,
+        history,
+        duration,
+        room.timeLeft?.w ?? 0,
+        room.timeLeft?.b ?? 0,
+        startedAt
+      ]
+    });
+    console.log("Game saved:", room.code, result);
+  } catch (err) {
+    console.error("Failed to save game:", err.message);
+  }
+}
+
 io.on("connection", socket => {
   socket.on("createRoom", ({ name, token } = {}) => {
     const code = makeCode();
     const room = {
       code, game: new Chess(), drawOffer: null, rematch: { w: false, b: false },
       players: { w: null, b: null }, createdAt: Date.now(),
-      timeLeft: { w: 600, b: 600 },        // 600s = 10 minutes
+      timeLeft: { w: 600, b: 600 },
       lastTick: Date.now()
     };
     room.players.w = {
@@ -124,6 +229,17 @@ io.on("connection", socket => {
     return sendError(socket, "This room already has two players.");
   });
 
+  socket.on("spectate", ({ code } = {}) => {
+    code = String(code || "").trim().toUpperCase();
+    const room = rooms.get(code);
+    if (!room) return sendError(socket, "Room not found.");
+    socket.join(room.code);
+    socket.data.roomCode = room.code;
+    socket.data.isSpectator = true;
+    socket.emit("spectating", { code: room.code, state: publicState(room) });
+    console.log("Spectator joined:", room.code);
+  });
+
   socket.on("reconnectRoom", ({ code, token } = {}) => {
     code = String(code || "").trim().toUpperCase();
     const room = rooms.get(code);
@@ -149,6 +265,7 @@ io.on("connection", socket => {
       room.rematch = { w: false, b: false };
       io.to(room.code).emit("lastMove", { from: move.from, to: move.to, san: move.san });
       emitState(room);
+      if (room.game.isGameOver()) saveGameRecord(room);
     } catch (_err) {
       sendError(socket, "Illegal move. Choose a legal destination.");
     }
@@ -164,6 +281,7 @@ io.on("connection", socket => {
       room.game.header("Result", "1/2-1/2");
       emitState(room);
       io.to(room.code).emit("notice", "Draw agreed.");
+      saveGameRecord(room);
     } else {
       room.drawOffer = color;
       emitState(room);
@@ -179,6 +297,7 @@ io.on("connection", socket => {
     room.game.header("Result", color === "w" ? "0-1" : "1-0");
     emitState(room);
     io.to(room.code).emit("notice", `${color === "w" ? "White" : "Black"} resigned.`);
+    saveGameRecord(room);
   });
 
   socket.on("rematch", () => {
@@ -192,6 +311,9 @@ io.on("connection", socket => {
       room.rematch = { w: false, b: false };
       room.resigned = null;
       room.drawAgreed = false;
+      room.timeLeft = { w: 600, b: 600 };
+      room.lastTick = Date.now();
+      room.createdAt = Date.now();
       emitState(room);
       io.to(room.code).emit("notice", "New game started.");
     } else {
@@ -207,20 +329,11 @@ io.on("connection", socket => {
       room.players[color].connected = false;
       room.players[color].socketId = null;
       emitState(room);
-      // Keep the room temporarily so a dropped player can reconnect.
-      setTimeout(() => {
-        const current = rooms.get(room.code);
-        if (!current) return;
-        const p = current.players[color];
-        if (p && !p.connected && p.token === room.players[color].token) {
-          // Room remains available for the other player; stale disconnected seat can reconnect.
-        }
-      }, 120000);
     }
   });
 });
 
-// Periodically remove empty rooms older than 6 hours.
+// Remove empty rooms older than 6 hours
 setInterval(() => {
   const cutoff = Date.now() - 6 * 60 * 60 * 1000;
   for (const [code, room] of rooms) {
@@ -229,8 +342,7 @@ setInterval(() => {
   }
 }, 30 * 60 * 1000).unref();
 
-
-// Global clock: ticks every second for every active room
+// Global clock
 setInterval(() => {
   const now = Date.now();
   for (const room of rooms.values()) {
@@ -254,8 +366,8 @@ setInterval(() => {
       room.game.header("Result", turn === "w" ? "0-1" : "1-0");
       emitState(room);
       io.to(room.code).emit("notice", (turn === "w" ? "White" : "Black") + " ran out of time.");
+      saveGameRecord(room);
     } else {
-      // Lightweight clock-only update — no board re-render on the client
       io.to(room.code).emit("clock", { timeLeft: room.timeLeft, turn });
     }
   }

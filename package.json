@@ -11,7 +11,9 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@libsql/client": "^0.18.0",
     "chess.js": "^1.4.0",
+    "dotenv": "^18.0.9",
     "express": "^5.1.0",
     "socket.io": "^4.8.1"
   }
