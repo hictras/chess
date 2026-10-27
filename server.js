@@ -255,7 +255,8 @@ setInterval(() => {
       emitState(room);
       io.to(room.code).emit("notice", (turn === "w" ? "White" : "Black") + " ran out of time.");
     } else {
-      emitState(room);
+      // Lightweight clock-only update — no board re-render on the client
+      io.to(room.code).emit("clock", { timeLeft: room.timeLeft, turn });
     }
   }
 }, 1000);

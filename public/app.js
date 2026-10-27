@@ -305,6 +305,21 @@
     if (!state.code || s.code !== state.code) return;
     renderState(s);
   });
+
+  socket.on("clock", ({ timeLeft, turn }) => {
+    if (!state.code || !state.color) return;
+    const other = state.color === "w" ? "b" : "w";
+    const fmt = (sec) => {
+      if (typeof sec !== "number") return "10:00";
+      const m = Math.floor(sec / 60);
+      const r = sec % 60;
+      return m + ":" + String(r).padStart(2, "0");
+    };
+    $("selfClock").textContent = fmt(timeLeft[state.color]);
+    $("opponentClock").textContent = fmt(timeLeft[other]);
+    $("selfClock").classList.toggle("active-clock", turn === state.color);
+    $("opponentClock").classList.toggle("active-clock", turn === other);
+  });
   socket.on("lastMove", move => { state.lastMove = move; state.selected = null; state.legalTargets = []; if (state.latestState) renderBoard(); });
   socket.on("gameError", message => {
     if ($("game").classList.contains("hidden")) lobbyError(message);
