@@ -111,9 +111,7 @@
                 <button onclick="event.stopPropagation();deleteGame(${g.id})" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:3px 7px;border-radius:5px;cursor:pointer;font-size:11px">🗑</button>
               </span>
             </div>
-            <div style="position:absolute;right:14px;top:50%;transform:translateY(-50%);">
-              <button onclick="event.stopPropagation();deleteGame(${g.id})" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:2px 6px;border-radius:4px;cursor:pointer;font-size:11px">🗑</button>
-            </div>
+            
             <div class="game-row" style="border-bottom:1px solid var(--line)">
               <span style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center">
                 <span style="font-size:11px;color:var(--muted)">${moveCount} moves · ${g.result}</span>
