@@ -42,14 +42,8 @@
         latestState: null, pendingPromotion: null, noticeTimer: null
     };
     const boardEl = $("board");
+    const promotionDialog = $("promotionDialog");
     const promotionDialog = ("promotionDialog");
-
-    /* --- SVG PIECE PRELOADER --- */
-    // Preloads all piece images into the browser cache to stop mobile blinking
-    Object.values(PIECES).forEach(src => {
-        const img = new Image();
-        img.src = src;
-    });
 
     function showNotice(message, error = false) {
         const el = $("gameNotice");
@@ -472,4 +466,9 @@
             chatMessages.scrollTop = chatMessages.scrollHeight;
         });
     }
+    /* --- SVG PIECE PRELOADER --- */
+    Object.values(PIECES).forEach(src => {
+        const img = new Image();
+        img.src = src;
+    });
 })();
