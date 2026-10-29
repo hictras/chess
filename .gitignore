@@ -1,7 +1,5 @@
 node_modules/
+.env.local
 .env
-.DS_Store
-.env.local
-public/styles.css
-.env.local
-node_modules/
+*.db
+chess-CODE-BACKUP.txt
