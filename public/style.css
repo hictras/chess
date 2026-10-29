@@ -1157,3 +1157,11 @@ body.embedded .top-status .live-dot {
   .side-panel { width: 100%; display: flex; flex-direction: column; }
   .chat-panel { height: 200px; min-height: 200px; }
 }
+
+/* --- PREVENT BOARD SCROLL --- */
+.board-frame, .board {
+  touch-action: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
