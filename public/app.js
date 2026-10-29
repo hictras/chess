@@ -43,7 +43,7 @@
     };
     const boardEl = $("board");
     const promotionDialog = $("promotionDialog");
-    const promotionDialog = ("promotionDialog");
+    
 
     function showNotice(message, error = false) {
         const el = $("gameNotice");
@@ -466,7 +466,9 @@
             chatMessages.scrollTop = chatMessages.scrollHeight;
         });
     }
-    /* --- SVG PIECE PRELOADER --- */
+    
+
+    // SVG PIECE PRELOADER (Stops mobile blinking)
     Object.values(PIECES).forEach(src => {
         const img = new Image();
         img.src = src;
