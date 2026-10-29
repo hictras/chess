@@ -1,13 +1,605 @@
 === PROJECT BACKUP ===
-Date: Thu Oct 29 16:02:04 MEST 2026
+Date: Thu Oct 29 22:42:16 MEST 2026
 
+
+--- FILE: README.md ---
+# Chess Online — Render deployment
+
+A responsive, real-time chess game for two devices. Node.js + Express + Socket.IO + chess.js.
+
+## Features
+- Create a private room or join with a room code
+- Real-time moves synchronized between both players
+- Server validates all moves with chess.js
+- White/Black assignment, player names, move list, captured pieces
+- Legal move highlighting, check/checkmate/stalemate/draw handling
+- Flip board for Black, resign, offer draw, rematch request
+- Reconnection to the same room using a per-tab session-stored player token (while the server process/room remains alive)
+- Render health endpoint at `/health`
+
+## Run locally
+Requires Node.js 20+.
+
+```bash
+npm install
+npm start
+```
+
+Open http://localhost:3000 in two browsers/devices. For two devices outside your local network, deploy it to Render.
+
+## Deploy to Render
+1. Create a GitHub repository and upload all files in this folder.
+2. In Render, choose **New + → Blueprint** and select the repository (it reads `render.yaml`), or create a **Web Service** manually.
+3. For manual setup:
+   - Runtime: Node
+   - Build command: `npm install`
+   - Start command: `npm start`
+4. Deploy and open the `https://your-service-name.onrender.com` address.
+5. Share the deployed URL with the other player. Create a room, then share its room code.
+
+## Important limitations
+- This starter uses in-memory rooms. Rooms and games are lost if the service restarts or sleeps; a free service may have cold starts.
+- It is intended for casual private games, not rated or money games.
+- Browser refresh reconnection works while the room still exists and the player token is retained. For persistent rooms across restarts or multiple server instances, add Redis/database storage and a Socket.IO adapter.
+- The website can be embedded in another site using an iframe pointing to the deployed URL, subject to the host site's iframe/CSP rules.
+--- END FILE: README.md ---
+
+--- FILE: package.json ---
+{
+  "name": "chess-online-render",
+  "version": "1.0.0",
+  "description": "Real-time two-player chess with Node.js, Express, Socket.IO and chess.js",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.18.0",
+    "chess.js": "^1.4.0",
+    "dotenv": "^18.0.9",
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1"
+  }
+}
+--- END FILE: package.json ---
 
 --- FILE: public/app.js ---
 (() => {
-  const $ = id => document.getElementById(id);
-  const socket = io();
+    const $ = id => document.getElementById(id);
+    const socket = io();
 
-  function cModal({ title, message, okText, cancelText, danger = false }) {
+    function cModal({ title, message, okText, cancelText, danger = false }) {
+        const isAr = document.cookie.split('; ').some(c => c === 'lang=ar');
+        const bg = document.createElement("div");
+        bg.className = "chess-modal-backdrop open";
+        bg.innerHTML = '<div class="chess-modal" dir="' + (isAr ? 'rtl' : 'ltr') + '">' +
+            '<h3>' + (title || (isAr ? 'تأكيد' : 'Confirm')) + '</h3>' +
+            '<p>' + (message || '') + '</p>' +
+            '<div class="chess-modal-actions">' +
+            '<button class="chess-modal-btn" data-action="cancel">' + (cancelText || (isAr ? 'إلغاء' : 'Cancel')) + '</button>' +
+            '<button class="chess-modal-btn ' + (danger ? 'danger' : 'primary') + '" data-action="ok">' + (okText || (isAr ? 'موافق' : 'OK')) + '</button>' +
+            '</div></div>';
+        document.body.appendChild(bg);
+        return new Promise(function(resolve) {
+            bg.addEventListener('click', function(e) {
+                var btn = e.target.closest('[data-action]');
+                if (btn) { bg.remove(); resolve(btn.dataset.action === 'ok'); }
+                else if (e.target === bg) { bg.remove(); resolve(false); }
+            });
+        });
+    }
+    const PIECES = {
+        wk: "/pieces/cburnett/wK.svg",
+        wq: "/pieces/cburnett/wQ.svg",
+        wr: "/pieces/cburnett/wR.svg",
+        wb: "/pieces/cburnett/wB.svg",
+        wn: "/pieces/cburnett/wN.svg",
+        wp: "/pieces/cburnett/wP.svg",
+        bk: "/pieces/cburnett/bK.svg",
+        bq: "/pieces/cburnett/bQ.svg",
+        br: "/pieces/cburnett/bR.svg",
+        bb: "/pieces/cburnett/bB.svg",
+        bn: "/pieces/cburnett/bN.svg",
+        bp: "/pieces/cburnett/bP.svg",
+    };
+    const state = {
+        code: null, color: null, token: sessionStorage.getItem("chessPlayerToken") || null,
+        game: null, flipped: false, selected: null, legalTargets: [], lastMove: null,
+        latestState: null, pendingPromotion: null, noticeTimer: null
+    };
+    const boardEl = $("board");
+    const promotionDialog = $("promotionDialog");
+
+    function showNotice(message, error = false) {
+        const el = $("gameNotice");
+        el.textContent = message || "";
+        el.classList.toggle("error-toast", error);
+        clearTimeout(state.noticeTimer);
+        if (message) state.noticeTimer = setTimeout(() => { if (el.textContent === message) el.textContent = ""; }, 5000);
+    }
+    function lobbyError(message) { $("lobbyError").textContent = message || ""; }
+    function displayGame() {
+        $("lobby").classList.add("hidden");
+        $("game").classList.remove("hidden");
+        $("roomCodeLabel").textContent = state.code;
+        $("inviteCode").textContent = state.code;
+    }
+    function showLobby() {
+        $("game").classList.add("hidden");
+        $("lobby").classList.remove("hidden");
+        state.code = null; state.color = null; state.game = null;
+        state.selected = null; state.legalTargets = []; state.latestState = null;
+    }
+    function copyCode() {
+        if (!state.code) return;
+        const text = state.code;
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(text).then(() => showNotice("Room code copied.")).catch(() => fallbackCopy(text));
+        } else fallbackCopy(text);
+    }
+    function fallbackCopy(text) {
+        const el = document.createElement("textarea");
+        el.value = text; document.body.appendChild(el); el.select();
+        try { document.execCommand("copy"); showNotice("Room code copied."); }
+        catch (_) { showNotice("Your room code is " + text); }
+        el.remove();
+    }
+    function safeName() { return $("playerName").value.trim().slice(0, 24) || "Player"; }
+    function persistSession() {
+        if (state.code && state.token) {
+            sessionStorage.setItem("chessRoomCode", state.code);
+            sessionStorage.setItem("chessPlayerToken", state.token);
+        }
+    }
+    function createRoom() {
+        if (!socket.connected) return lobbyError("Connecting to the game server. Please try again in a moment.");
+        lobbyError("");
+        state.token = sessionStorage.getItem("chessPlayerToken") || null;
+        socket.emit("createRoom", { name: safeName(), token: state.token });
+    }
+    function joinRoom() {
+        if (!socket.connected) return lobbyError("Connecting to the game server. Please try again in a moment.");
+        const code = $("roomCode").value.trim().toUpperCase();
+        if (!/^[A-Z0-9]{6}$/.test(code)) return lobbyError("Enter the 6-character room code.");
+        lobbyError("");
+        socket.emit("joinRoom", { code, name: safeName(), token: sessionStorage.getItem("chessPlayerToken") || null });
+    }
+    function getLegalTargets(square) {
+        if (!state.game) return [];
+        return state.game.moves({ square, verbose: true }).map(m => m.to);
+    }
+    function pieceAt(square) {
+        const piece = state.game && state.game.get(square);
+        return piece ? PIECES[piece.color + piece.type] : "";
+    }
+    function findCheckedKingSquare(game) {
+        try {
+            if (!game) return null;
+            var inChk = (typeof game.inCheck === "function") ? game.inCheck() : (game.in_check ? game.in_check() : false);
+            if (!inChk) return null;
+            const turn = game.turn();
+            const board = game.board();
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const sq = board[r][c];
+                    if (sq && sq.type === "k" && sq.color === turn) {
+                        return "abcdefgh"[c] + (8 - r);
+                    }
+                }
+            }
+        } catch (e) {}
+        return null;
+    }
+
+    function renderBoard() {
+        if (!state.game) return;
+        const checkedKingSquare = findCheckedKingSquare(state.game);
+        boardEl.innerHTML = "";
+        const files = state.flipped ? "hgfedcba" : "abcdefgh";
+        const ranks = state.flipped ? "12345678" : "87654321";
+        const fenRows = state.game.board();
+        const boardMap = {};
+        fenRows.forEach((row, ri) => row.forEach((p, fi) => {
+            if (p) boardMap["abcdefgh"[fi] + (8 - ri)] = p;
+        }));
+        for (let r = 0; r < 8; r++) {
+            for (let f = 0; f < 8; f++) {
+                const square = files[f] + ranks[r];
+                const piece = boardMap[square];
+                const fileIndex = "abcdefgh".indexOf(square[0]);
+                const rank = Number(square[1]);
+                const light = (fileIndex + rank) % 2 === 0;
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "square " + (light ? "light" : "dark");
+                btn.dataset.square = square;
+                btn.setAttribute("aria-label", square + (piece ? " " + piece.color + " " + piece.type : ""));
+                if (state.selected === square) btn.classList.add("selected");
+                if (state.lastMove && (state.lastMove.from === square || state.lastMove.to === square)) btn.classList.add("last-move");
+                if (square === checkedKingSquare) btn.classList.add("checked-king");
+                if (piece) {
+                    const span = document.createElement("span");
+                    span.className = "piece " + (piece.color === "w" ? "white" : "black");
+                    span.innerHTML = `<img src="${PIECES[piece.color + piece.type]}" alt="" style="width:100%;height:100%;object-fit:contain;pointer-events:none" />`;
+                    btn.appendChild(span);
+                }
+                if (state.legalTargets.includes(square)) {
+                    const mark = document.createElement("span");
+                    mark.className = piece ? "capture-ring" : "dot";
+                    btn.appendChild(mark);
+                }
+                if (f === 0) {
+                    const coord = document.createElement("span");
+                    coord.className = "coord rank"; coord.textContent = square[1]; btn.appendChild(coord);
+                }
+                if (r === 7) {
+                    const coord = document.createElement("span");
+                    coord.className = "coord file"; coord.textContent = square[0]; btn.appendChild(coord);
+                }
+                btn.addEventListener("click", () => onSquareClick(square));
+                boardEl.appendChild(btn);
+            }
+        }
+    }
+    function onSquareClick(square) {
+        if (!state.game || !state.latestState || state.latestState.status === "checkmate" ||
+                ["stalemate", "threefold", "insufficient", "draw"].includes(state.latestState.status)) return;
+        if (state.latestState.turn !== state.color) return showNotice("It is not your turn.", true);
+        const piece = state.game.get(square);
+        if (state.selected && state.legalTargets.includes(square)) {
+            const moves = state.game.moves({ square: state.selected, verbose: true }).filter(m => m.to === square);
+            const promotionMoves = moves.filter(m => m.promotion);
+            if (promotionMoves.length) {
+                state.pendingPromotion = { from: state.selected, to: square };
+                promotionDialog.showModal();
+            } else {
+                socket.emit("move", { from: state.selected, to: square });
+                state.selected = null; state.legalTargets = []; renderBoard();
+            }
+            return;
+        }
+        if (piece && piece.color === state.color) {
+            state.selected = square;
+            state.legalTargets = getLegalTargets(square);
+            renderBoard();
+        } else {
+            state.selected = null; state.legalTargets = []; renderBoard();
+        }
+    }
+    function renderHistory(history) {
+        const list = $("moveList");
+        list.innerHTML = "";
+        if (!history.length) {
+            const empty = document.createElement("div");
+            empty.className = "empty-moves"; empty.textContent = "Your opening move will appear here.";
+            list.appendChild(empty);
+        } else {
+            for (let i = 0; i < history.length; i += 2) {
+                const pair = document.createElement("div");
+                pair.className = "move-pair";
+                const no = document.createElement("span"); no.className = "move-no"; no.textContent = (Math.floor(i / 2) + 1) + ".";
+                const white = document.createElement("span"); white.className = "move-san"; white.textContent = history[i].san;
+                const black = document.createElement("span"); black.className = "move-san";
+                if (history[i + 1]) black.textContent = history[i + 1].san;
+                if (i + (history[i + 1] ? 1 : 0) === history.length - 1) (history[i + 1] || history[i]).san && (history[i + 1] ? black : white).classList.add("latest");
+                pair.append(no, white, black); list.appendChild(pair);
+            }
+            list.scrollTop = list.scrollHeight;
+        }
+        $("moveCount").textContent = history.length + (history.length === 1 ? " move" : " moves");
+    }
+
+    function capturedPieces(history, capturedColor) {
+        const captured = history.filter(m => m.captured && m.color !== capturedColor);
+        if (!captured.length) return document.createTextNode("—");
+        const container = document.createElement("div");
+        container.style.display = "flex";
+        container.style.gap = "2px";
+        container.style.alignItems = "center";
+        container.style.flexWrap = "wrap";
+        captured.forEach(m => {
+            const img = document.createElement("img");
+            img.src = PIECES[capturedColor + m.captured];
+            img.alt = m.captured;
+            img.style.width = "18px";
+            img.style.height = "18px";
+            img.style.objectFit = "contain";
+            container.appendChild(img);
+        });
+        return container;
+    }
+
+    function renderState(s) {
+        state.latestState = s;
+        try { state.game = new Chess(s.fen); } catch (_) { return showNotice("Could not read the latest board position.", true); }
+        if (state.selected && !state.game.get(state.selected)) { state.selected = null; state.legalTargets = []; }
+        const other = state.color === "w" ? "b" : "w";
+        const me = s.players[state.color];
+        const opponent = s.players[other];
+        $("selfName").textContent = me ? me.name + " (You)" : "You";
+        $("selfCaption").textContent = state.color === "w" ? "Playing White" : "Playing Black";
+        $("opponentName").textContent = opponent ? opponent.name : "Waiting for opponent";
+        $("opponentCaption").textContent = opponent ? (opponent.connected ? "Connected" : "Reconnecting…") : "Share the room code to invite them";
+        const isMyTurn = s.turn === state.color && s.status === "playing";
+        const isTheirTurn = s.turn === other && s.status === "playing";
+        const fmt = (sec) => {
+            if (typeof sec !== "number") return "10:00";
+            const m = Math.floor(sec / 60);
+            const r = sec % 60;
+            return m + ":" + String(r).padStart(2, "0");
+        };
+        $("selfClock").textContent = fmt(s.timeLeft ? s.timeLeft[state.color] : 600);
+        $("opponentClock").textContent = fmt(s.timeLeft ? s.timeLeft[other] : 600);
+        $("selfClock").classList.toggle("active-clock", isMyTurn);
+        $("opponentClock").classList.toggle("active-clock", isTheirTurn);
+        $("turnIndicator").innerHTML = '<i class="turn-dot"></i> ' + statusLine(s);
+        const badge = $("statusBadge");
+        badge.textContent = badgeText(s);
+        $("statusTitle").textContent = titleText(s);
+        $("statusDescription").textContent = descriptionText(s);
+        $("drawBtn").disabled = !opponent || s.status !== "playing";
+        $("resignBtn").disabled = !opponent || s.status !== "playing";
+        $("rematchBtn").classList.toggle("hidden", !["checkmate", "stalemate", "threefold", "insufficient", "draw"].includes(s.status));
+        $("rematchBtn").textContent = s.rematch && s.rematch[state.color] ? "✓ Rematch requested" : "↻ Request rematch";
+
+        const capturedYouEl = $("capturedByYou");
+        capturedYouEl.innerHTML = "";
+        capturedYouEl.appendChild(capturedPieces(s.history, state.color));
+
+        const capturedOppEl = $("capturedByOpponent");
+        capturedOppEl.innerHTML = "";
+        capturedOppEl.appendChild(capturedPieces(s.history, other));
+
+        renderHistory(s.history);
+        renderBoard();
+    }
+    function statusLine(s) {
+        if (!s.players.b) return "Waiting for opponent";
+        if (!s.players.w?.connected || !s.players.b?.connected) return "Player reconnecting";
+        if (s.status === "checkmate") return "Checkmate";
+        if (["stalemate", "threefold", "insufficient", "draw", "resigned"].includes(s.status)) return "Game drawn";
+        if (s.status === "check") return (s.turn === state.color ? "Your king is in check" : "Opponent is in check");
+        return s.turn === state.color ? "Your turn to move" : "Opponent's turn";
+    }
+    function badgeText(s) {
+        if (!s.players.b) return "WAITING";
+        if (s.status === "checkmate" || s.status === "resigned") return "GAME OVER";
+        if (["stalemate", "threefold", "insufficient", "draw", "resigned"].includes(s.status)) return "DRAW";
+        if (s.status === "check") return "CHECK";
+        return "IN PROGRESS";
+    }
+    function titleText(s) {
+        if (!s.players.b) return "Waiting for a challenger";
+        if (s.status === "resigned") return s.winner === state.color ? "Victory by resignation!" : "You resigned";
+        if (s.status === "checkmate") return (s.winner === state.color ? "Victory!" : "Game over") ;
+        if (s.status === "stalemate") return "Draw by stalemate";
+        if (s.status === "threefold") return "Draw by repetition";
+        if (s.status === "insufficient") return "Draw — insufficient material";
+        if (s.status === "draw") return "Game drawn";
+        if (s.status === "check") return "King in check";
+        return s.turn === state.color ? "Your move" : "Opponent is thinking";
+    }
+    function descriptionText(s) {
+        if (!s.players.b) return "Send your room code to a friend. The game starts when they join.";
+        if (s.status === "checkmate") return (s.winner === state.color ? "You won this game. Well played." : "Your opponent has won this game.") + " Request a rematch to play again.";
+        if (["stalemate", "threefold", "insufficient", "draw", "resigned"].includes(s.status)) return "The game ended in a draw. You can request a rematch.";
+        if (s.drawOffer && s.drawOffer !== state.color) return "Your opponent offered a draw. Press Offer draw to accept.";
+        if (s.drawOffer === state.color) return "Draw offered. Waiting for your opponent.";
+        if (!s.players[state.color]?.connected || !s.players[state.color === "w" ? "b" : "w"]?.connected) return "A player has disconnected. The same room can be rejoined using the saved browser session.";
+        return s.turn === state.color ? "Take your time and find the strongest move." : "Waiting for your opponent to make a move.";
+    }
+    function joinSuccess(data) {
+        state.code = data.code; state.color = data.color; state.token = data.token;
+        persistSession();
+        displayGame();
+        renderState(data.state);
+        showNotice("You are playing " + (state.color === "w" ? "White" : "Black") + ".");
+    }
+
+    $("createBtn").addEventListener("click", createRoom);
+    $("joinBtn").addEventListener("click", joinRoom);
+    $("roomCode").addEventListener("input", e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6); });
+    $("roomCode").addEventListener("keydown", e => { if (e.key === "Enter") joinRoom(); });
+    $("playerName").addEventListener("keydown", e => { if (e.key === "Enter") createRoom(); });
+    $("copyCodeBtn").addEventListener("click", copyCode);
+    $("copyInviteBtn").addEventListener("click", copyCode);
+    $("flipBtn").addEventListener("click", () => { state.flipped = !state.flipped; renderBoard(); });
+    $("leaveBtn").addEventListener("click", async () => {
+        const isAr = document.cookie.split('; ').some(c => c === 'lang=ar');
+        const ok = await cModal({
+            title: isAr ? 'مغادرة المباراة' : 'Leave Game',
+            message: isAr ? 'مغادرة هذه المباراة؟ يمكنك العودة بالرمز.' : 'Leave this match? You can rejoin with the room code while the room is available.',
+            okText: isAr ? 'مغادرة' : 'Leave',
+            danger: true
+        });
+        if (ok) {
+            sessionStorage.removeItem("chessRoomCode");
+            showLobby();
+        }
+    });
+    $("drawBtn").addEventListener("click", () => socket.emit("offerDraw"));
+    $("resignBtn").addEventListener("click", async () => {
+        const isAr = document.cookie.split('; ').some(c => c === 'lang=ar');
+        const ok = await cModal({
+            title: isAr ? 'الاستسلام' : 'Resign',
+            message: isAr ? 'هل تريد الاستسلام؟ ستفقد هذه المباراة.' : 'Are you sure you want to resign this game?',
+            okText: isAr ? 'استسلم' : 'Resign',
+            danger: true
+        });
+        if (ok) socket.emit("resign");
+    });
+    $("rematchBtn").addEventListener("click", () => socket.emit("rematch"));
+    promotionDialog.querySelectorAll(".promo-piece").forEach(button => {
+        button.addEventListener("click", event => {
+            event.preventDefault();
+            const promotion = button.value;
+            const move = state.pendingPromotion;
+            promotionDialog.close();
+            state.pendingPromotion = null;
+            if (move) socket.emit("move", { from: move.from, to: move.to, promotion });
+            state.selected = null; state.legalTargets = []; renderBoard();
+        });
+    });
+    promotionDialog.querySelector(".cancel-promo").addEventListener("click", () => {
+        state.pendingPromotion = null; state.selected = null; state.legalTargets = []; renderBoard();
+    });
+    socket.on("connect", () => {
+        $("connectionText").textContent = "Connected";
+        document.querySelector(".live-dot").classList.add("connected");
+        const savedCode = sessionStorage.getItem("chessRoomCode");
+        const token = sessionStorage.getItem("chessPlayerToken");
+        if (savedCode && token && !state.code) socket.emit("reconnectRoom", { code: savedCode, token });
+    });
+    socket.on("disconnect", () => {
+        $("connectionText").textContent = "Reconnecting";
+        document.querySelector(".live-dot").classList.remove("connected");
+        if (!document.querySelector("#game").classList.contains("hidden")) showNotice("Connection lost. Reconnecting…", true);
+    });
+    socket.on("joined", joinSuccess);
+    socket.on("state", s => {
+        if (!state.code || s.code !== state.code) return;
+        renderState(s);
+    });
+
+    socket.on("clock", ({ timeLeft, turn }) => {
+        if (!state.code || !state.color) return;
+        const other = state.color === "w" ? "b" : "w";
+        const fmt = (sec) => {
+            if (typeof sec !== "number") return "10:00";
+            const m = Math.floor(sec / 60);
+            const r = sec % 60;
+            return m + ":" + String(r).padStart(2, "0");
+        };
+        $("selfClock").textContent = fmt(timeLeft[state.color]);
+        $("opponentClock").textContent = fmt(timeLeft[other]);
+        $("selfClock").classList.toggle("active-clock", turn === state.color);
+        $("opponentClock").classList.toggle("active-clock", turn === other);
+    });
+    socket.on("lastMove", move => { state.lastMove = move; state.selected = null; state.legalTargets = []; if (state.latestState) renderBoard(); });
+    socket.on("gameError", message => {
+        if ($("game").classList.contains("hidden")) lobbyError(message);
+        else showNotice(message, true);
+    });
+    socket.on("notice", message => showNotice(message));
+    const savedName = localStorage.getItem("chessPlayerName");
+    if (savedName) $("playerName").value = savedName;
+    $("playerName").addEventListener("change", () => localStorage.setItem("chessPlayerName", safeName()));
+    const savedCode = sessionStorage.getItem("chessRoomCode");
+    if (savedCode) $("roomCode").value = savedCode;
+
+    // Chat feature logic
+    const chatForm = $("chatForm");
+    const chatInput = $("chatInput");
+    const chatMessages = $("chatMessages");
+
+    if (chatForm && chatInput && !window._chatInitialized) {
+        window._chatInitialized = true;
+
+        let lastSendTime = 0;
+
+        chatForm.addEventListener("submit", function (e) {
+            e.preventDefault();
+
+            const message = chatInput.value.trim();
+            if (!message || !state.code) return;
+
+            const now = Date.now();
+            if (now - lastSendTime < 500) return;
+
+            lastSendTime = now;
+            socket.emit("chatMessage", {
+                code: state.code,
+                message: message
+            });
+
+            chatInput.value = "";
+            chatInput.focus();
+        });
+
+        socket.on("chatMessage", function (data) {
+            if (!chatMessages || !data) return;
+
+            const div = document.createElement("div");
+            div.className = "chat-msg";
+
+            const userSpan = document.createElement("span");
+            userSpan.className = "chat-user";
+            userSpan.textContent = (data.name || "Player") + ":";
+
+            div.append(userSpan, document.createTextNode(" " + data.message));
+            chatMessages.appendChild(div);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        });
+    }
+})();--- END FILE: public/app.js ---
+
+--- FILE: public/chess.min.js ---
+var Chess=function(r){var u="b",s="w",l=-1,_="p",A="n",S="b",m="r",y="q",p="k",t="pnbrqkPNBRQK",e="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",g=["1-0","0-1","1/2-1/2","*"],C={b:[16,32,17,15],w:[-16,-32,-17,-15]},T={n:[-18,-33,-31,-14,18,33,31,14],b:[-17,-15,17,15],r:[-16,1,16,-1],q:[-17,-16,-15,1,17,16,15,-1],k:[-17,-16,-15,1,17,16,15,-1]},c=[20,0,0,0,0,0,0,24,0,0,0,0,0,0,20,0,0,20,0,0,0,0,0,24,0,0,0,0,0,20,0,0,0,0,20,0,0,0,0,24,0,0,0,0,20,0,0,0,0,0,0,20,0,0,0,24,0,0,0,20,0,0,0,0,0,0,0,0,20,0,0,24,0,0,20,0,0,0,0,0,0,0,0,0,0,20,2,24,2,20,0,0,0,0,0,0,0,0,0,0,0,2,53,56,53,2,0,0,0,0,0,0,24,24,24,24,24,24,56,0,56,24,24,24,24,24,24,0,0,0,0,0,0,2,53,56,53,2,0,0,0,0,0,0,0,0,0,0,0,20,2,24,2,20,0,0,0,0,0,0,0,0,0,0,20,0,0,24,0,0,20,0,0,0,0,0,0,0,0,20,0,0,0,24,0,0,0,20,0,0,0,0,0,0,20,0,0,0,0,24,0,0,0,0,20,0,0,0,0,20,0,0,0,0,0,24,0,0,0,0,0,20,0,0,20,0,0,0,0,0,0,24,0,0,0,0,0,0,20],v=[17,0,0,0,0,0,0,16,0,0,0,0,0,0,15,0,0,17,0,0,0,0,0,16,0,0,0,0,0,15,0,0,0,0,17,0,0,0,0,16,0,0,0,0,15,0,0,0,0,0,0,17,0,0,0,16,0,0,0,15,0,0,0,0,0,0,0,0,17,0,0,16,0,0,15,0,0,0,0,0,0,0,0,0,0,17,0,16,0,15,0,0,0,0,0,0,0,0,0,0,0,0,17,16,15,0,0,0,0,0,0,0,1,1,1,1,1,1,1,0,-1,-1,-1,-1,-1,-1,-1,0,0,0,0,0,0,0,-15,-16,-17,0,0,0,0,0,0,0,0,0,0,0,0,-15,0,-16,0,-17,0,0,0,0,0,0,0,0,0,0,-15,0,0,-16,0,0,-17,0,0,0,0,0,0,0,0,-15,0,0,0,-16,0,0,0,-17,0,0,0,0,0,0,-15,0,0,0,0,-16,0,0,0,0,-17,0,0,0,0,-15,0,0,0,0,0,-16,0,0,0,0,0,-17,0,0,-15,0,0,0,0,0,0,-16,0,0,0,0,0,0,-17],h={p:0,n:1,b:2,r:3,q:4,k:5},o={NORMAL:"n",CAPTURE:"c",BIG_PAWN:"b",EP_CAPTURE:"e",PROMOTION:"p",KSIDE_CASTLE:"k",QSIDE_CASTLE:"q"},I={NORMAL:1,CAPTURE:2,BIG_PAWN:4,EP_CAPTURE:8,PROMOTION:16,KSIDE_CASTLE:32,QSIDE_CASTLE:64},P=7,w=6,L=1,R=0,N={a8:0,b8:1,c8:2,d8:3,e8:4,f8:5,g8:6,h8:7,a7:16,b7:17,c7:18,d7:19,e7:20,f7:21,g7:22,h7:23,a6:32,b6:33,c6:34,d6:35,e6:36,f6:37,g6:38,h6:39,a5:48,b5:49,c5:50,d5:51,e5:52,f5:53,g5:54,h5:55,a4:64,b4:65,c4:66,d4:67,e4:68,f4:69,g4:70,h4:71,a3:80,b3:81,c3:82,d3:83,e3:84,f3:85,g3:86,h3:87,a2:96,b2:97,c2:98,d2:99,e2:100,f2:101,g2:102,h2:103,a1:112,b1:113,c1:114,d1:115,e1:116,f1:117,g1:118,h1:119},E={w:[{square:N.a1,flag:I.QSIDE_CASTLE},{square:N.h1,flag:I.KSIDE_CASTLE}],b:[{square:N.a8,flag:I.QSIDE_CASTLE},{square:N.h8,flag:I.KSIDE_CASTLE}]},O=new Array(128),k={w:l,b:l},q=s,D={w:0,b:0},K=l,d=0,b=1,Q=[],U={};function x(r){void 0===r&&(r=!1),O=new Array(128),k={w:l,b:l},q=s,D={w:0,b:0},K=l,d=0,b=1,Q=[],r||(U={}),F(M())}function j(){B(e)}function B(r,e){void 0===e&&(e=!1);var n=r.split(/\s+/),t=n[0],o=0;if(!$(r).valid)return!1;x(e);for(var i=0;i<t.length;i++){var f=t.charAt(i);if("/"===f)o+=8;else if(-1!=="0123456789".indexOf(f))o+=parseInt(f,10);else{var a=f<"a"?s:u;W({type:f.toLowerCase(),color:a},fr(o)),o++}}return q=n[1],-1<n[2].indexOf("K")&&(D.w|=I.KSIDE_CASTLE),-1<n[2].indexOf("Q")&&(D.w|=I.QSIDE_CASTLE),-1<n[2].indexOf("k")&&(D.b|=I.KSIDE_CASTLE),-1<n[2].indexOf("q")&&(D.b|=I.QSIDE_CASTLE),K="-"===n[3]?l:N[n[3]],d=parseInt(n[4],10),b=parseInt(n[5],10),F(M()),!0}function $(r){var e="No errors.",n="FEN string must contain six space-delimited fields.",t="6th field (move number) must be a positive integer.",o="5th field (half move counter) must be a non-negative integer.",i="4th field (en-passant square) is invalid.",f="3rd field (castling availability) is invalid.",a="2nd field (side to move) is invalid.",l="1st field (piece positions) does not contain 8 '/'-delimited rows.",u="1st field (piece positions) is invalid [consecutive numbers].",s="1st field (piece positions) is invalid [invalid piece].",p="1st field (piece positions) is invalid [row too large].",c="Illegal en-passant square",v=r.split(/\s+/);if(6!==v.length)return{valid:!1,error_number:1,error:n};if(isNaN(v[5])||parseInt(v[5],10)<=0)return{valid:!1,error_number:2,error:t};if(isNaN(v[4])||parseInt(v[4],10)<0)return{valid:!1,error_number:3,error:o};if(!/^(-|[abcdefgh][36])$/.test(v[3]))return{valid:!1,error_number:4,error:i};if(!/^(KQ?k?q?|Qk?q?|kq?|q|-)$/.test(v[2]))return{valid:!1,error_number:5,error:f};if(!/^(w|b)$/.test(v[1]))return{valid:!1,error_number:6,error:a};var g=v[0].split("/");if(8!==g.length)return{valid:!1,error_number:7,error:l};for(var h=0;h<g.length;h++){for(var E=0,d=!1,b=0;b<g[h].length;b++)if(isNaN(g[h][b])){if(!/^[prnbqkPRNBQK]$/.test(g[h][b]))return{valid:!1,error_number:9,error:s};E+=1,d=!1}else{if(d)return{valid:!1,error_number:8,error:u};E+=parseInt(g[h][b],10),d=!0}if(8!==E)return{valid:!1,error_number:10,error:p}}return"3"==v[3][1]&&"w"==v[1]||"6"==v[3][1]&&"b"==v[1]?{valid:!1,error_number:11,error:c}:{valid:!0,error_number:0,error:e}}function M(){for(var r=0,e="",n=N.a8;n<=N.h1;n++){if(null==O[n])r++;else{0<r&&(e+=r,r=0);var t=O[n].color,o=O[n].type;e+=t===s?o.toUpperCase():o.toLowerCase()}n+1&136&&(0<r&&(e+=r),n!==N.h1&&(e+="/"),r=0,n+=8)}var i="";D[s]&I.KSIDE_CASTLE&&(i+="K"),D[s]&I.QSIDE_CASTLE&&(i+="Q"),D[u]&I.KSIDE_CASTLE&&(i+="k"),D[u]&I.QSIDE_CASTLE&&(i+="q"),i=i||"-";var f=K===l?"-":fr(K);return[e,q,i,f,d,b].join(" ")}function G(r){for(var e=0;e<r.length;e+=2)"string"==typeof r[e]&&"string"==typeof r[e+1]&&(U[r[e]]=r[e+1]);return U}function F(r){0<Q.length||(r!==e?(U.SetUp="1",U.FEN=r):(delete U.SetUp,delete U.FEN))}function i(r){var e=O[N[r]];return e?{type:e.type,color:e.color}:null}function W(r,e){if(!("type"in r&&"color"in r))return!1;if(-1===t.indexOf(r.type.toLowerCase()))return!1;if(!(e in N))return!1;var n=N[e];return(r.type!=p||k[r.color]==l||k[r.color]==n)&&(O[n]={type:r.type,color:r.color},r.type===p&&(k[r.color]=n),F(M()),!0)}function H(r,e,n,t,o){var i={color:q,from:e,to:n,flags:t,piece:r[e].type};return o&&(i.flags|=I.PROMOTION,i.promotion=o),r[n]?i.captured=r[n].type:t&I.EP_CAPTURE&&(i.captured=_),i}function Z(r){function e(r,e,n,t,o){if(r[n].type!==_||or(t)!==R&&or(t)!==P)e.push(H(r,n,t,o));else for(var i=[y,m,S,A],f=0,a=i.length;f<a;f++)e.push(H(r,n,t,o,i[f]))}var n=[],t=q,o=ar(t),i={b:L,w:w},f=N.a8,a=N.h1,l=!1,u=!(void 0!==r&&"legal"in r)||r.legal;if(void 0!==r&&"square"in r){if(!(r.square in N))return[];f=a=N[r.square],l=!0}for(var s=f;s<=a;s++)if(136&s)s+=7;else{var p=O[s];if(null!=p&&p.color===t)if(p.type===_){var c=s+C[t][0];if(null==O[c]){e(O,n,s,c,I.NORMAL);c=s+C[t][1];i[t]===or(s)&&null==O[c]&&e(O,n,s,c,I.BIG_PAWN)}for(v=2;v<4;v++){136&(c=s+C[t][v])||(null!=O[c]&&O[c].color===o?e(O,n,s,c,I.CAPTURE):c===K&&e(O,n,s,K,I.EP_CAPTURE))}}else for(var v=0,g=T[p.type].length;v<g;v++){var h=T[p.type][v];for(c=s;!(136&(c+=h));){if(null!=O[c]){if(O[c].color===t)break;e(O,n,s,c,I.CAPTURE);break}if(e(O,n,s,c,I.NORMAL),"n"===p.type||"k"===p.type)break}}}if(!l||a===k[t]){if(D[t]&I.KSIDE_CASTLE){var E=(d=k[t])+2;null!=O[d+1]||null!=O[E]||V(o,k[t])||V(o,d+1)||V(o,E)||e(O,n,k[t],E,I.KSIDE_CASTLE)}if(D[t]&I.QSIDE_CASTLE){var d;E=(d=k[t])-2;null!=O[d-1]||null!=O[d-2]||null!=O[d-3]||V(o,k[t])||V(o,d-1)||V(o,E)||e(O,n,k[t],E,I.QSIDE_CASTLE)}}if(!u)return n;var b=[];for(s=0,g=n.length;s<g;s++)er(n[s]),X(t)||b.push(n[s]),nr();return b}function z(r,e){var n="";if(r.flags&I.KSIDE_CASTLE)n="O-O";else if(r.flags&I.QSIDE_CASTLE)n="O-O-O";else{var t=function(r,e){for(var n=Z({legal:!e}),t=r.from,o=r.to,i=r.piece,f=0,a=0,l=0,u=0,s=n.length;u<s;u++){var p=n[u].from,c=n[u].to,v=n[u].piece;i===v&&t!==p&&o===c&&(f++,or(t)===or(p)&&a++,ir(t)===ir(p)&&l++)}if(0<f)return 0<a&&0<l?fr(t):0<l?fr(t).charAt(1):fr(t).charAt(0);return""}(r,e);r.piece!==_&&(n+=r.piece.toUpperCase()+t),r.flags&(I.CAPTURE|I.EP_CAPTURE)&&(r.piece===_&&(n+=fr(r.from)[0]),n+="x"),n+=fr(r.to),r.flags&I.PROMOTION&&(n+="="+r.promotion.toUpperCase())}return er(r),f()&&(a()?n+="#":n+="+"),nr(),n}function J(r){return r.replace(/=/,"").replace(/[+#]?[?!]*$/,"")}function V(r,e){for(var n=N.a8;n<=N.h1;n++)if(136&n)n+=7;else if(null!=O[n]&&O[n].color===r){var t=O[n],o=n-e,i=119+o;if(c[i]&1<<h[t.type]){if(t.type===_){if(0<o){if(t.color===s)return!0}else if(t.color===u)return!0;continue}if("n"===t.type||"k"===t.type)return!0;for(var f=v[i],a=n+f,l=!1;a!==e;){if(null!=O[a]){l=!0;break}a+=f}if(!l)return!0}}return!1}function X(r){return V(ar(r),k[r])}function f(){return X(q)}function a(){return f()&&0===Z().length}function n(){return!f()&&0===Z().length}function Y(){for(var r={},e=[],n=0,t=0,o=N.a8;o<=N.h1;o++)if(t=(t+1)%2,136&o)o+=7;else{var i=O[o];i&&(r[i.type]=i.type in r?r[i.type]+1:1,i.type===S&&e.push(t),n++)}if(2===n)return!0;if(3===n&&(1===r[S]||1===r[A]))return!0;if(n===r[S]+2){var f=0,a=e.length;for(o=0;o<a;o++)f+=e[o];if(0===f||f===a)return!0}return!1}function rr(){for(var r=[],e={},n=!1;;){var t=nr();if(!t)break;r.push(t)}for(;;){var o=M().split(" ").slice(0,4).join(" ");if(e[o]=o in e?e[o]+1:1,3<=e[o]&&(n=!0),!r.length)break;er(r.pop())}return n}function er(r){var e,n=q,t=ar(n);if(e=r,Q.push({move:e,kings:{b:k.b,w:k.w},turn:q,castling:{b:D.b,w:D.w},ep_square:K,half_moves:d,move_number:b}),O[r.to]=O[r.from],O[r.from]=null,r.flags&I.EP_CAPTURE&&(q===u?O[r.to-16]=null:O[r.to+16]=null),r.flags&I.PROMOTION&&(O[r.to]={type:r.promotion,color:n}),O[r.to].type===p){if(k[O[r.to].color]=r.to,r.flags&I.KSIDE_CASTLE){var o=r.to-1,i=r.to+1;O[o]=O[i],O[i]=null}else if(r.flags&I.QSIDE_CASTLE){o=r.to+1,i=r.to-2;O[o]=O[i],O[i]=null}D[n]=""}if(D[n])for(var f=0,a=E[n].length;f<a;f++)if(r.from===E[n][f].square&&D[n]&E[n][f].flag){D[n]^=E[n][f].flag;break}if(D[t])for(f=0,a=E[t].length;f<a;f++)if(r.to===E[t][f].square&&D[t]&E[t][f].flag){D[t]^=E[t][f].flag;break}K=r.flags&I.BIG_PAWN?"b"===q?r.to-16:r.to+16:l,r.piece===_||r.flags&(I.CAPTURE|I.EP_CAPTURE)?d=0:d++,q===u&&b++,q=ar(q)}function nr(){var r=Q.pop();if(null==r)return null;var e=r.move;k=r.kings,q=r.turn,D=r.castling,K=r.ep_square,d=r.half_moves,b=r.move_number;var n,t,o=q,i=ar(q);if(O[e.from]=O[e.to],O[e.from].type=e.piece,O[e.to]=null,e.flags&I.CAPTURE)O[e.to]={type:e.captured,color:i};else if(e.flags&I.EP_CAPTURE){var f;f=o===u?e.to-16:e.to+16,O[f]={type:_,color:i}}e.flags&(I.KSIDE_CASTLE|I.QSIDE_CASTLE)&&(e.flags&I.KSIDE_CASTLE?(n=e.to+1,t=e.to-1):e.flags&I.QSIDE_CASTLE&&(n=e.to-2,t=e.to+1),O[n]=O[t],O[t]=null);return e}function tr(r,e){var n=J(r);if(e){var t=n.match(/([pnbrqkPNBRQK])?([a-h][1-8])x?-?([a-h][1-8])([qrbnQRBN])?/);if(t)var o=t[1],i=t[2],f=t[3],a=t[4]}for(var l=Z(),u=0,s=l.length;u<s;u++){if(n===J(z(l[u]))||e&&n===J(z(l[u],!0)))return l[u];if(t&&(!o||o.toLowerCase()==l[u].piece)&&N[i]==l[u].from&&N[f]==l[u].to&&(!a||a.toLowerCase()==l[u].promotion))return l[u]}return null}function or(r){return r>>4}function ir(r){return 15&r}function fr(r){var e=ir(r),n=or(r);return"abcdefgh".substring(e,e+1)+"87654321".substring(n,n+1)}function ar(r){return r===s?u:s}function lr(r){var e=function r(e){var n=e instanceof Array?[]:{};for(var t in e)n[t]="object"==typeof t?r(e[t]):e[t];return n}(r);e.san=z(e,!1),e.to=fr(e.to),e.from=fr(e.from);var n="";for(var t in I)I[t]&e.flags&&(n+=o[t]);return e.flags=n,e}function ur(r){return r.replace(/^\s+|\s+$/g,"")}return B(void 0===r?e:r),{WHITE:s,BLACK:u,PAWN:_,KNIGHT:A,BISHOP:S,ROOK:m,QUEEN:y,KING:p,SQUARES:function(){for(var r=[],e=N.a8;e<=N.h1;e++)136&e?e+=7:r.push(fr(e));return r}(),FLAGS:o,load:function(r){return B(r)},reset:function(){return j()},moves:function(r){for(var e=Z(r),n=[],t=0,o=e.length;t<o;t++)void 0!==r&&"verbose"in r&&r.verbose?n.push(lr(e[t])):n.push(z(e[t],!1));return n},in_check:function(){return f()},in_checkmate:function(){return a()},in_stalemate:function(){return n()},in_draw:function(){return 100<=d||n()||Y()||rr()},insufficient_material:function(){return Y()},in_threefold_repetition:function(){return rr()},game_over:function(){return 100<=d||a()||n()||Y()||rr()},validate_fen:function(r){return $(r)},fen:function(){return M()},board:function(){for(var r=[],e=[],n=N.a8;n<=N.h1;n++)null==O[n]?e.push(null):e.push({type:O[n].type,color:O[n].color}),n+1&136&&(r.push(e),e=[],n+=8);return r},pgn:function(r){var e="object"==typeof r&&"string"==typeof r.newline_char?r.newline_char:"\n",n="object"==typeof r&&"number"==typeof r.max_width?r.max_width:0,t=[],o=!1;for(var i in U)t.push("["+i+' "'+U[i]+'"]'+e),o=!0;o&&Q.length&&t.push(e);for(var f=[];0<Q.length;)f.push(nr());for(var a=[],l="";0<f.length;){var u=f.pop();Q.length||"b"!==u.color?"w"===u.color&&(l.length&&a.push(l),l=b+"."):l=b+". ...",l=l+" "+z(u,!1),er(u)}if(l.length&&a.push(l),void 0!==U.Result&&a.push(U.Result),0===n)return t.join("")+a.join(" ");var s=0;for(i=0;i<a.length;i++)s+a[i].length>n&&0!==i?(" "===t[t.length-1]&&t.pop(),t.push(e),s=0):0!==i&&(t.push(" "),s++),t.push(a[i]),s+=a[i].length;return t.join("")},load_pgn:function(r,e){var n=void 0!==e&&"sloppy"in e&&e.sloppy;function l(r){return r.replace(/\\/g,"\\")}var t="object"==typeof e&&"string"==typeof e.newline_char?e.newline_char:"\r?\n",o=new RegExp("^(\\[((?:"+l(t)+")|.)*\\])(?:"+l(t)+"){2}"),i=o.test(r)?o.exec(r)[1]:"";j();var f=function(r,e){for(var n="object"==typeof e&&"string"==typeof e.newline_char?e.newline_char:"\r?\n",t={},o=r.split(new RegExp(l(n))),i="",f="",a=0;a<o.length;a++)i=o[a].replace(/^\[([A-Z][A-Za-z]*)\s.*\]$/,"$1"),f=o[a].replace(/^\[[A-Za-z]+\s"(.*)"\]$/,"$1"),0<ur(i).length&&(t[i]=f);return t}(i,e);for(var a in f)G([a,f[a]]);if("1"===f.SetUp&&!("FEN"in f&&B(f.FEN,!0)))return!1;var u=r.replace(i,"").replace(new RegExp(l(t),"g")," ");u=u.replace(/(\{[^}]+\})+?/g,"");for(var s=/(\([^\(\)]+\))+?/g;s.test(u);)u=u.replace(s,"");var p=ur(u=(u=(u=u.replace(/\d+\.(\.\.)?/g,"")).replace(/\.\.\./g,"")).replace(/\$\d+/g,"")).split(new RegExp(/\s+/));p=p.join(",").replace(/,,+/g,",").split(",");for(var c="",v=0;v<p.length-1;v++){if(null==(c=tr(p[v],n)))return!1;er(c)}if(c=p[p.length-1],-1<g.indexOf(c))!function(r){for(var e in r)return 1}(U)||void 0!==U.Result||G(["Result",c]);else{if(null==(c=tr(c,n)))return!1;er(c)}return!0},header:function(){return G(arguments)},ascii:function(){return function(){for(var r="   +------------------------+\n",e=N.a8;e<=N.h1;e++){if(0===ir(e)&&(r+=" "+"87654321"[or(e)]+" |"),null==O[e])r+=" . ";else{var n=O[e].type;r+=" "+(O[e].color===s?n.toUpperCase():n.toLowerCase())+" "}e+1&136&&(r+="|\n",e+=8)}return r+="   +------------------------+\n",r+="     a  b  c  d  e  f  g  h\n"}()},turn:function(){return q},move:function(r,e){var n=void 0!==e&&"sloppy"in e&&e.sloppy,t=null;if("string"==typeof r)t=tr(r,n);else if("object"==typeof r)for(var o=Z(),i=0,f=o.length;i<f;i++)if(!(r.from!==fr(o[i].from)||r.to!==fr(o[i].to)||"promotion"in o[i]&&r.promotion!==o[i].promotion)){t=o[i];break}if(!t)return null;var a=lr(t);return er(t),a},undo:function(){var r=nr();return r?lr(r):null},clear:function(){return x()},put:function(r,e){return W(r,e)},get:function(r){return i(r)},remove:function(r){return n=i(e=r),O[N[e]]=null,n&&n.type===p&&(k[n.color]=l),F(M()),n;var e,n},perft:function(r){return function r(e){for(var n=Z({legal:!1}),t=0,o=q,i=0,f=n.length;i<f;i++)er(n[i]),X(o)||(0<e-1?t+=r(e-1):t++),nr();return t}(r)},square_color:function(r){if(r in N){var e=N[r];return(or(e)+ir(e))%2==0?"light":"dark"}return null},history:function(r){for(var e=[],n=[],t=(void 0!==r&&"verbose"in r&&r.verbose);0<Q.length;)e.push(nr());for(;0<e.length;){var o=e.pop();t?n.push(lr(o)):n.push(z(o)),er(o)}return n}}};"undefined"!=typeof exports&&(exports.Chess=Chess),"undefined"!=typeof define&&define(function(){return Chess});--- END FILE: public/chess.min.js ---
+
+--- FILE: public/history.html ---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess — Live & History</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .tabs{display:flex;gap:8px;margin:20px 0}
+    .tab{padding:10px 18px;border-radius:10px;background:var(--surface);border:1px solid var(--line);cursor:pointer;font-weight:700;font-size:13px;color:var(--ink-soft)}
+    .tab.active{background:var(--olive);color:#14200a;border-color:var(--olive)}
+    .table-wrap{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow-x:auto}
+    .table-head{display:grid;grid-template-columns:60px 1fr 1fr 70px 50px 100px 32px;gap:8px;padding:10px 12px;background:var(--bg-2);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase}
+    .game-row{display:grid;grid-template-columns:60px 1fr 1fr 70px 50px 100px 32px;gap:8px;padding:12px 12px;border-bottom:1px solid var(--line);font-size:12px;align-items:center}
+    .game-row:last-child{border-bottom:none}
+    .game-row.clickable{cursor:pointer;transition:background .15s}
+    .game-row.clickable:hover{background:rgba(155,201,108,.05)}
+    .game-row .code{font-family:var(--font-mono);color:var(--olive);font-weight:700}
+    .game-row .date{color:var(--muted);font-size:10px}
+    .winner{font-weight:700}
+    .winner.white{color:#fff}
+    .winner.black{color:var(--olive)}
+    .winner.draw{color:var(--muted)}
+    .live-badge{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:800;color:var(--danger);background:rgba(224,104,79,.12);padding:3px 8px;border-radius:5px}
+    .live-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--danger);animation:pulse 1.5s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+    .moves-btn{background:transparent;border:1px solid var(--line);color:var(--olive);font-size:10px;padding:4px 8px;border-radius:6px;cursor:pointer;font-weight:700}
+    .moves-btn:hover{background:rgba(155,201,108,.08)}
+    .moves-detail{grid-column:1/-1;padding:8px 14px 14px;font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);line-height:1.7;word-break:break-word;background:rgba(0,0,0,.15)}
+    .empty{text-align:center;padding:40px 20px;color:var(--muted);font-size:13px}
+    .hidden{display:none!important}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="brand"><span class="brand-mark">♞</span><span class="brand-name">CHESS</span></a>
+    
+  </header>
+  <main class="layout" style="max-width:980px">
+    <div class="hero" style="margin-bottom:20px">
+      <span class="eyebrow">GAME RECORDS</span>
+      <h1 style="font-size:36px">Live &amp; History</h1>
+    </div>
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('live')">🔴 Live Games</button>
+      <button class="tab" onclick="switchTab('history')">📜 History</button>
+      <button id="clearAllBtn" onclick="clearAll()" style="margin-left:auto;background:rgba(224,104,79,.12);color:#e0684f;border:1px solid rgba(224,104,79,.35);padding:10px 16px;border-radius:10px;font-weight:700;font-size:12px;cursor:pointer;display:none">🗑 Clear all</button>
+    </div>
+    <div id="live" class="table-wrap">
+      <div class="table-head"><span>Code</span><span>White</span><span>Black</span><span>Turn</span><span>Moves</span><span>Watch</span></div>
+      <div id="liveBody"><div class="empty">Loading...</div></div>
+    </div>
+    <div id="history" class="table-wrap hidden">
+      <div class="table-head"><span>Code</span><span>White</span><span>Black</span><span>Winner</span><span>Time</span><span>Date</span><span></span></div>
+      <div id="historyBody"><div class="empty">Loading...</div></div>
+    </div>
+  </main>
+  <script>
+    function cModal({ title, message, okText, cancelText, danger = false, confirmOnly = false }) {
     const isAr = document.cookie.split('; ').some(c => c === 'lang=ar');
     const bg = document.createElement("div");
     bg.className = "chess-modal-backdrop open";
@@ -15,7 +607,7 @@ Date: Thu Oct 29 16:02:04 MEST 2026
       '<h3>' + (title || (isAr ? 'تأكيد' : 'Confirm')) + '</h3>' +
       '<p>' + (message || '') + '</p>' +
       '<div class="chess-modal-actions">' +
-      '<button class="chess-modal-btn" data-action="cancel">' + (cancelText || (isAr ? 'إلغاء' : 'Cancel')) + '</button>' +
+      (confirmOnly ? '' : '<button class="chess-modal-btn" data-action="cancel">' + (cancelText || (isAr ? 'إلغاء' : 'Cancel')) + '</button>') +
       '<button class="chess-modal-btn ' + (danger ? 'danger' : 'primary') + '" data-action="ok">' + (okText || (isAr ? 'موافق' : 'OK')) + '</button>' +
       '</div></div>';
     document.body.appendChild(bg);
@@ -27,7 +619,424 @@ Date: Thu Oct 29 16:02:04 MEST 2026
       });
     });
   }
-  const PIECES = {
+
+  function switchTab(which){
+      document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById('live').classList.toggle('hidden',which!=='live');
+      document.getElementById('history').classList.toggle('hidden',which!=='history');
+      document.getElementById('clearAllBtn').style.display = which === 'history' ? 'inline-block' : 'none';
+    }
+    function fmt(sec){if(typeof sec!=='number')return '—';return Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0')}
+    function fmtDate(iso){
+      if(!iso)return '—';
+      try{
+        const d=new Date(iso);
+        return d.toLocaleDateString()+' '+d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      }catch(e){return '—'}
+    }
+    async function loadLive(){
+      try{
+        const res=await fetch('/api/games/live');const d=await res.json();
+        const b=document.getElementById('liveBody');
+        if(!d.live||d.live.length===0){b.innerHTML='<div class="empty">No live games right now.</div>';return}
+        b.innerHTML=d.live.map(g=>`
+          <div class="game-row clickable" onclick="window.location.href='/watch.html?code=${g.code}'">
+            <span class="code">${g.code}</span>
+            <span>${g.white}</span>
+            <span>${g.black}</span>
+            <span><span class="live-badge">${g.turn==='w'?'WHITE':'BLACK'}</span></span>
+            <span>${g.moves} moves</span>
+            <span>👁 Watch</span>
+          </div>`).join('');
+      }catch(e){document.getElementById('liveBody').innerHTML='<div class="empty">Failed to load.</div>'}
+    }
+    async function loadHistory(){
+      try{
+        const res=await fetch('/api/games?limit=50');const d=await res.json();
+        const b=document.getElementById('historyBody');
+        if(!d.games||d.games.length===0){b.innerHTML='<div class="empty">No games finished yet.</div>';return}
+        b.innerHTML=d.games.map((g,i)=>{
+          let label='—',cls='draw';
+          if(g.winner==='white'){label=g.player_white;cls='white'}
+          else if(g.winner==='black'){label=g.player_black;cls='black'}
+          else if(g.result==='draw'){label='Draw'}
+          const moves = (g.moves||'').trim();
+          const moveCount = moves ? moves.split(/\s+/).length : 0;
+          return `
+            <div class="game-row" onclick="window.location.href='/replay.html?id=${g.id}'" style="cursor:pointer">
+              <span class="code">${g.code}</span>
+              <span>${g.player_white}</span>
+              <span>${g.player_black}</span>
+              <span class="winner ${cls}">${label}</span>
+              <span>${fmt(g.duration_seconds)}</span>
+              <span class="date">${fmtDate(g.started_at)}</span>
+              <span style="text-align:center">
+                <button onclick="event.stopPropagation();deleteGame(${g.id})" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:3px 6px;border-radius:5px;cursor:pointer;font-size:11px">🗑</button>
+              </span>
+            </div>
+            
+            <div class="game-row" style="border-bottom:1px solid var(--line)">
+              <span style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:11px;color:var(--muted)">${moveCount} moves · ${g.result}</span>
+                ${moves ? `<button class="moves-btn" onclick="toggleMoves(${i})">Show moves</button>` : ''}
+              </span>
+            </div>
+            ${moves ? `<div id="moves-${i}" class="moves-detail hidden">${moves}</div>` : ''}
+          `;
+        }).join('');
+      }catch(e){document.getElementById('historyBody').innerHTML='<div class="empty">Failed to load.</div>'}
+    }
+    function toggleMoves(i){
+      const el = document.getElementById('moves-'+i);
+      if(el) el.classList.toggle('hidden');
+    }
+    async function deleteGame(id) {
+      var ok = await cModal({ title: document.cookie.includes('lang=ar') ? 'حذف المباراة' : 'Delete Game', message: document.cookie.includes('lang=ar') ? 'هل تريد حذف هذه المباراة من السجل؟' : 'Delete this game from history?', okText: document.cookie.includes('lang=ar') ? 'حذف' : 'Delete', danger: true });
+      if (!ok) return;
+      try {
+        const r = await fetch('/api/games/' + id, { method: 'DELETE' });
+        if (r.ok) { loadHistory(); } else { await cModal({ title: document.cookie.includes('lang=ar') ? 'خطأ' : 'Error', message: document.cookie.includes('lang=ar') ? 'فشل الحذف' : 'Delete failed', confirmOnly: true }); }
+      } catch(e) { await cModal({ title: document.cookie.includes('lang=ar') ? 'خطأ' : 'Error', message: document.cookie.includes('lang=ar') ? 'فشل الحذف' : 'Delete failed', confirmOnly: true }); }
+    }
+    async function clearAll() {
+      var ok = await cModal({ title: document.cookie.includes('lang=ar') ? 'حذف الكل' : 'Delete All', message: document.cookie.includes('lang=ar') ? 'هل تريد حذف كل سجل المباريات؟ لا يمكن التراجع عن هذا الإجراء.' : 'Delete ALL game history? This cannot be undone.', okText: document.cookie.includes('lang=ar') ? 'حذف الكل' : 'Delete All', danger: true });
+      if (!ok) return;
+      try {
+        const r = await fetch('/api/games', { method: 'DELETE' });
+        if (r.ok) { loadHistory(); } else { await cModal({ title: document.cookie.includes('lang=ar') ? 'خطأ' : 'Error', message: document.cookie.includes('lang=ar') ? 'فشل المسح' : 'Clear failed', confirmOnly: true }); }
+      } catch(e) { await cModal({ title: document.cookie.includes('lang=ar') ? 'خطأ' : 'Error', message: document.cookie.includes('lang=ar') ? 'فشل المسح' : 'Clear failed', confirmOnly: true }); }
+    }
+    loadLive();loadHistory();
+    setInterval(loadLive,5000);
+  </script>
+</body>
+</html>
+<!-- css patch -->
+--- END FILE: public/history.html ---
+
+--- FILE: public/index.html ---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chess Online</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <!-- Topbar -->
+  <header class="topbar">
+    <a href="#" class="brand">
+      <div class="brand-mark">♟</div>
+      <span class="brand-name">CHESS ONLINE</span>
+    </a>
+    <div style="display: flex; align-items: center;">
+      <a href="/history.html" class="btn-ghost-sm" style="margin-right:12px; color:var(--ink-soft, #8b949e); text-decoration:none; padding: 6px 12px; border: 1px solid var(--line, #30363d); border-radius: 6px; font-size: 13px;">📜 History</a>
+      <div class="top-status">
+        <span class="live-dot"></span>
+        <span id="connectionText">Connecting…</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <!-- LOBBY VIEW -->
+    <section id="lobby" class="lobby">
+      <div class="hero">
+        <span class="eyebrow">REAL-TIME MULTIPLAYER</span>
+        <h1>Play Chess <em>Online</em></h1>
+        <p>Create a private room or join your friend with a code to play instantly.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="label">START A MATCH</span>
+          <span class="icon">♔</span>
+        </div>
+
+        <label class="field-label" for="playerName">YOUR NAME</label>
+        <input type="text" id="playerName" class="text-input" placeholder="Enter your name" maxlength="24" autocomplete="off">
+
+        <button type="button" id="createBtn" class="btn btn-primary btn-create">
+          <span>Create New Room</span>
+          <span class="arrow">→</span>
+        </button>
+
+        <div class="divider">OR JOIN EXISTING</div>
+
+        <label class="field-label" for="roomCode">ROOM CODE</label>
+        <div class="join-row">
+          <input type="text" id="roomCode" class="text-input code-input" placeholder="6-CHAR" maxlength="6" autocomplete="off">
+          <button type="button" id="joinBtn" class="btn btn-secondary">Join</button>
+        </div>
+
+        <div id="lobbyError" class="error-text"></div>
+      </div>
+    </section>
+
+    <!-- GAME VIEW -->
+    <section id="game" class="game-shell hidden">
+      <div class="game-topline">
+        <div>
+          <span class="label">ROOM CODE</span>
+          <div class="room-line">
+            <strong id="roomCodeLabel">------</strong>
+            <button type="button" id="copyCodeBtn" class="copy-btn">Copy</button>
+          </div>
+        </div>
+        <button type="button" id="leaveBtn" class="btn btn-ghost-sm">Leave Game</button>
+      </div>
+
+      <div class="game-grid">
+        <!-- Board Section -->
+        <div class="board-panel">
+          <!-- Opponent Strip -->
+          <div class="player-strip">
+            <div class="avatar">♝</div>
+            <div class="player-info">
+              <strong id="opponentName">Waiting for opponent</strong>
+              <span id="opponentCaption">Share room code</span>
+            </div>
+            <div id="opponentClock" class="clock">10:00</div>
+          </div>
+
+          <!-- Board Frame -->
+          <div class="board-frame">
+            <div id="board" class="board"></div>
+          </div>
+
+          <!-- Self Strip -->
+          <div class="player-strip self-strip">
+            <div class="avatar self-avatar">♙</div>
+            <div class="player-info">
+              <strong id="selfName">You</strong>
+              <span id="selfCaption">Playing White</span>
+            </div>
+            <div id="selfClock" class="clock">10:00</div>
+          </div>
+
+          <div class="board-footer">
+            <span id="turnIndicator"><i class="turn-dot"></i> Waiting for opponent</span>
+            <button type="button" id="flipBtn" class="btn btn-ghost-sm">Flip Board</button>
+          </div>
+        </div>
+
+        <!-- Sidebar Section -->
+        <div class="side-panel">
+          <!-- Status Panel -->
+          <div class="panel status-panel">
+            <div class="panel-head">
+              <span class="label">STATUS</span>
+              <span id="statusBadge" class="status-badge">WAITING</span>
+            </div>
+            <h3 id="statusTitle">Waiting for a challenger</h3>
+            <p id="statusDescription">Send your room code to a friend. The game starts when they join.</p>
+
+            <div class="invite-box">
+              <span>INVITE CODE</span>
+              <div>
+                <strong id="inviteCode">------</strong>
+                <button type="button" id="copyInviteBtn" class="btn btn-ghost-sm">Copy</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Move History Panel -->
+          <div class="panel moves-panel">
+            <div class="panel-head">
+              <h3>Move History</h3>
+              <span id="moveCount">0 moves</span>
+            </div>
+            <div id="moveList" class="move-list">
+              <div class="empty-moves">Your opening move will appear here.</div>
+            </div>
+          </div>
+
+          <!-- Captured Pieces Panel -->
+          <div class="panel captured-panel">
+            <span class="label">CAPTURED PIECES</span>
+            <div class="captured-row">
+              <span>By You:</span>
+              <div id="capturedByYou" class="captured-pieces">—</div>
+            </div>
+            <div class="captured-row">
+              <span>By Opponent:</span>
+              <div id="capturedByOpponent" class="captured-pieces">—</div>
+            </div>
+          </div>
+
+          <!-- Chat Panel -->
+          <div class="panel chat-panel">
+            <div class="panel-head">
+              <span class="label">GAME CHAT</span>
+            </div>
+            <div id="chatMessages" class="chat-messages"></div>
+            <form id="chatForm" class="chat-form" action="javascript:void(0);">
+              <input type="text" id="chatInput" class="text-input" placeholder="Type a message..." autocomplete="off" maxlength="256">
+              <button type="submit" id="chatSendBtn" class="btn btn-primary">
+  Send
+</button>
+            </form>
+          </div>
+
+          <!-- Actions -->
+          <div class="action-row">
+            <button type="button" id="drawBtn" class="btn btn-secondary" disabled>Offer draw</button>
+            <button type="button" id="resignBtn" class="btn btn-danger" disabled>Resign</button>
+          </div>
+
+          <button type="button" id="rematchBtn" class="btn btn-primary rematch-btn hidden">↻ Request rematch</button>
+
+          <div id="gameNotice" class="game-notice"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Promotion Dialog -->
+  <dialog id="promotionDialog" class="promotion-dialog">
+    <h3>Promote Pawn</h3>
+    <p>Choose a piece to promote your pawn:</p>
+    <div class="promotion-options">
+      <button type="button" class="promo-piece" value="q">♛</button>
+      <button type="button" class="promo-piece" value="r">♜</button>
+      <button type="button" class="promo-piece" value="b">♝</button>
+      <button type="button" class="promo-piece" value="n">♞</button>
+    </div>
+    <button type="button" class="btn btn-secondary cancel-promo">Cancel</button>
+  </dialog>
+
+  <!-- Scripts -->
+  <script src="/chess.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
+--- END FILE: public/index.html ---
+
+--- FILE: public/replay.html ---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess — Replay</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .replay-bar{display:flex;gap:10px;align-items:center;justify-content:center;margin:16px 0;flex-wrap:wrap}
+    .replay-bar button{padding:10px 18px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-weight:700;cursor:pointer}
+    .replay-bar button:disabled{opacity:.4;cursor:not-allowed}
+    .replay-bar button.primary{background:var(--olive);color:#14200a;border-color:var(--olive)}
+    .replay-info{text-align:center;margin-bottom:12px;font-size:13px;color:var(--muted)}
+    .replay-info strong{color:var(--ink);font-size:15px}
+    .move-time{font-size:10px;color:var(--muted);margin-left:6px;font-weight:400}
+    .mode-row{text-align:center;margin:8px 0;font-size:12px;color:var(--muted);display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+    .mode-btn{padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);font-size:11px;font-weight:700;cursor:pointer}
+    .mode-btn.active{background:var(--olive);color:#14200a;border-color:var(--olive)}
+    .board-with-players{display:grid;grid-template-columns:140px 1fr 140px;gap:12px;align-items:center;max-width:820px;margin:0 auto}
+    .player-side{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+    .player-side .avatar{width:36px;height:36px;border-radius:9px;background:var(--surface-2);color:var(--ink-soft);display:grid;place-items:center;font-size:22px;border:1px solid var(--line)}
+    .player-side.white .avatar{background:#eeeed2;color:#1a1410;border-color:#ddd5b8}
+    .player-side.black .avatar{background:#3a3834;color:#eeeed2;border-color:#555}
+    .player-side .name{font-size:12px;font-weight:700;text-align:center;word-break:break-word;max-width:100%}
+    .player-side .clock{font-family:var(--font-mono);font-size:13px;font-weight:700;background:var(--bg-2);color:var(--ink-soft);padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
+    @media(max-width:640px){
+      .board-with-players{grid-template-columns:1fr;gap:8px}
+      .player-side{flex-direction:row;justify-content:space-between;padding:8px 12px}
+      .player-side .name{text-align:left;font-size:12px}
+    }
+    }
+    </style>
+  <link rel="preload" as="image" href="/pieces/cburnett/wK.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/wQ.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/wR.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/wB.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/wN.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/wP.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/bK.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/bQ.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/bR.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/bB.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/bN.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/bP.svg">
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="brand"><span class="brand-mark">♞</span><span class="brand-name">CHESS</span></a>
+    <a href="/history.html" class="btn-ghost-sm">← Back to History</a>
+  </header>
+  <main class="layout">
+    <div class="hero" style="margin-bottom:16px">
+      <span class="eyebrow">GAME REPLAY</span>
+      <h1 style="font-size:32px">Watching the Game</h1>
+    </div>
+
+    <div class="replay-info">
+      <div id="result"></div>
+    </div>
+
+    <div class="mode-row">
+      <span>Speed:</span>
+      <button class="mode-btn active" data-mode="realtime" onclick="setSpeed('realtime')">⏱ Real time</button>
+      <button class="mode-btn" data-mode="fast" onclick="setSpeed('fast')">⚡ Fast (0.8s)</button>
+    </div>
+
+    <div class="board-with-players">
+      <div class="player-side white">
+        <div class="avatar">♔</div>
+        <div class="name" id="whiteName">White</div>
+        <div class="clock" id="whiteClock">10:00</div>
+      </div>
+      <div class="board-frame" style="max-width:560px">
+        <div id="board" class="board"></div>
+      </div>
+      <div class="player-side black">
+        <div class="avatar">♚</div>
+        <div class="name" id="blackName">Black</div>
+        <div class="clock" id="blackClock">10:00</div>
+      </div>
+    </div>
+
+    <div class="replay-bar">
+      <button id="prevBtn" onclick="step(-1)">← Prev</button>
+      <button id="playBtn" class="primary" onclick="togglePlay()">▶ Play</button>
+      <button id="nextBtn" onclick="step(1)">Next →</button>
+    </div>
+    <div class="replay-info">
+      <span id="moveLabel">Move 0 / 0</span> · <span id="currentMove">—</span>
+    </div>
+
+    <div class="panel moves-panel" style="margin-top:16px">
+      <div class="panel-head">
+        <h3>Full Move List</h3>
+        <span id="moveCount">—</span>
+      </div>
+      <div id="moveList" class="move-list"></div>
+    </div>
+  </main>
+
+  <script src="/chess.min.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    function cModal({ title, message, okText, cancelText, danger = false }) {
+      const isAr = document.cookie.split('; ').some(c => c === 'lang=ar');
+      const bg = document.createElement("div");
+      bg.className = "chess-modal-backdrop open";
+      bg.innerHTML = '<div class="chess-modal" dir="' + (isAr ? 'rtl' : 'ltr') + '"><h3>' + (title || (isAr ? 'تأكيد' : 'Confirm')) + '</h3><p>' + (message || '') + '</p><div class="chess-modal-actions">' + (cancelText !== null ? '<button class="chess-modal-btn" data-action="cancel">' + (cancelText || (isAr ? 'إلغاء' : 'Cancel')) + '</button>' : '') + '<button class="chess-modal-btn ' + (danger ? 'danger' : 'primary') + '" data-action="ok">' + (okText || (isAr ? 'موافق' : 'OK')) + '</button></div></div>';
+      document.body.appendChild(bg);
+      return new Promise(function(resolve) {
+        bg.addEventListener('click', function(e) {
+          var btn = e.target.closest('[data-action]');
+          if (btn) { bg.remove(); resolve(btn.dataset.action === 'ok'); }
+          else if (e.target === bg) { bg.remove(); resolve(false); }
+        });
+      });
+    }
+    const PIECES = {
     wk: "/pieces/cburnett/wK.svg",
     wq: "/pieces/cburnett/wQ.svg",
     wr: "/pieces/cburnett/wR.svg",
@@ -41,371 +1050,254 @@ Date: Thu Oct 29 16:02:04 MEST 2026
     bn: "/pieces/cburnett/bN.svg",
     bp: "/pieces/cburnett/bP.svg",
   };
-  const state = {
-    code: null, color: null, token: sessionStorage.getItem("chessPlayerToken") || null,
-    game: null, flipped: false, selected: null, legalTargets: [], lastMove: null,
-    latestState: null, pendingPromotion: null, noticeTimer: null
-  };
-  const boardEl = $("board");
-  const promotionDialog = $("promotionDialog");
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("id");
+    let moves = [];
+    let moveTimes = [];
+    let currentStep = 0;
+    let playing = false;
+    let playTimer = null;
+    let tickTimer = null;
+    let liveWUsed = 0;
+    let liveBUsed = 0;
+    let speedMode = 'realtime';
+    let gameMeta = null;
+    let lastMoveSquares = { from: null, to: null };
 
-  function showNotice(message, error = false) {
-    const el = $("gameNotice");
-    el.textContent = message || "";
-    el.classList.toggle("error-toast", error);
-    clearTimeout(state.noticeTimer);
-    if (message) state.noticeTimer = setTimeout(() => { if (el.textContent === message) el.textContent = ""; }, 5000);
-  }
-  function lobbyError(message) { $("lobbyError").textContent = message || ""; }
-  function displayGame() {
-    $("lobby").classList.add("hidden");
-    $("game").classList.remove("hidden");
-    $("roomCodeLabel").textContent = state.code;
-    $("inviteCode").textContent = state.code;
-  }
-  function showLobby() {
-    $("game").classList.add("hidden");
-    $("lobby").classList.remove("hidden");
-    state.code = null; state.color = null; state.game = null;
-    state.selected = null; state.legalTargets = []; state.latestState = null;
-  }
-  function copyCode() {
-    if (!state.code) return;
-    const text = state.code;
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(() => showNotice("Room code copied.")).catch(() => fallbackCopy(text));
-    } else fallbackCopy(text);
-  }
-  function fallbackCopy(text) {
-    const el = document.createElement("textarea");
-    el.value = text; document.body.appendChild(el); el.select();
-    try { document.execCommand("copy"); showNotice("Room code copied."); }
-    catch (_) { showNotice("Your room code is " + text); }
-    el.remove();
-  }
-  function safeName() { return $("playerName").value.trim().slice(0, 24) || "Player"; }
-  function persistSession() {
-    if (state.code && state.token) {
-      sessionStorage.setItem("chessRoomCode", state.code);
-      sessionStorage.setItem("chessPlayerToken", state.token);
+    function fmtMoveTime(ms) {
+      if (typeof ms !== "number" || ms < 0) return "";
+      const totalSec = Math.floor(ms / 1000);
+      const m = Math.floor(totalSec / 60);
+      const sec = totalSec % 60;
+      return m + ":" + String(sec).padStart(2, "0");
     }
-  }
-  function createRoom() {
-    if (!socket.connected) return lobbyError("Connecting to the game server. Please try again in a moment.");
-    lobbyError("");
-    state.token = sessionStorage.getItem("chessPlayerToken") || null;
-    socket.emit("createRoom", { name: safeName(), token: state.token });
-  }
-  function joinRoom() {
-    if (!socket.connected) return lobbyError("Connecting to the game server. Please try again in a moment.");
-    const code = $("roomCode").value.trim().toUpperCase();
-    if (!/^[A-Z0-9]{6}$/.test(code)) return lobbyError("Enter the 6-character room code.");
-    lobbyError("");
-    socket.emit("joinRoom", { code, name: safeName(), token: sessionStorage.getItem("chessPlayerToken") || null });
-  }
-  function getLegalTargets(square) {
-    if (!state.game) return [];
-    return state.game.moves({ square, verbose: true }).map(m => m.to);
-  }
-  function pieceAt(square) {
-    const piece = state.game && state.game.get(square);
-    return piece ? PIECES[piece.color + piece.type] : "";
-  }
-  function findCheckedKingSquare(game) {
-    try {
-      if (!game) return null;
-    var inChk = (typeof game.inCheck === "function") ? game.inCheck() : (game.in_check ? game.in_check() : false);
-    if (!inChk) return null;
-      const turn = game.turn();
-      const board = game.board();
+    function fmtClock(sec) {
+      if (typeof sec !== "number") return "10:00";
+      return Math.floor(sec/60) + ":" + String(sec%60).padStart(2,"0");
+    }
+
+    function setSpeed(mode) {
+      speedMode = mode;
+      document.querySelectorAll('.mode-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.mode === mode);
+      });
+      if (playing) { clearTimeout(playTimer); scheduleNext(); }
+    }
+
+    function renderBoardFromFen(fen) {
+      const lm = computeLastMove(currentStep);
+      const g = new Chess(fen);
+      const boardEl = $("board");
+      boardEl.innerHTML = "";
+      const rows = g.board();
+      const map = {};
+      rows.forEach((row, ri) => row.forEach((p, fi) => {
+        if (p) map["abcdefgh"[fi] + (8 - ri)] = p;
+      }));
       for (let r = 0; r < 8; r++) {
-        for (let c = 0; c < 8; c++) {
-          const sq = board[r][c];
-          if (sq && sq.type === "k" && sq.color === turn) {
-            return "abcdefgh"[c] + (8 - r);
+        for (let f = 0; f < 8; f++) {
+          const sq = "abcdefgh"[f] + (8 - r);
+          const piece = map[sq];
+          const light = ((f + (8-r)) % 2 === 0);
+          const cell = document.createElement("div");
+          cell.className = "square " + (light ? "light" : "dark");
+          if (sq === lm.from || sq === lm.to) cell.classList.add("replay-last-move");
+          if (piece) {
+            const span = document.createElement("span");
+            span.className = "piece " + (piece.color === "w" ? "white" : "black");
+            span.innerHTML = `<img src="${PIECES[piece.color + piece.type]}" alt="" style="width:100%;height:100%;object-fit:contain;pointer-events:none" />`;
+            cell.appendChild(span);
           }
+          boardEl.appendChild(cell);
         }
       }
-    } catch (e) {}
-    return null;
-  }
+    }
 
-  function renderBoard() {
-    if (!state.game) return;
-    const checkedKingSquare = findCheckedKingSquare(state.game);
-    boardEl.innerHTML = "";
-    const files = state.flipped ? "hgfedcba" : "abcdefgh";
-    const ranks = state.flipped ? "12345678" : "87654321";
-    const fenRows = state.game.board();
-    const boardMap = {};
-    fenRows.forEach((row, ri) => row.forEach((p, fi) => {
-      if (p) boardMap["abcdefgh"[fi] + (8 - ri)] = p;
-    }));
-    for (let r = 0; r < 8; r++) {
-      for (let f = 0; f < 8; f++) {
-        const square = files[f] + ranks[r];
-        const piece = boardMap[square];
-        const fileIndex = "abcdefgh".indexOf(square[0]);
-        const rank = Number(square[1]);
-        const light = (fileIndex + rank) % 2 === 0;
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "square " + (light ? "light" : "dark");
-        btn.dataset.square = square;
-        btn.setAttribute("aria-label", square + (piece ? " " + piece.color + " " + piece.type : ""));
-        if (state.selected === square) btn.classList.add("selected");
-        if (state.lastMove && (state.lastMove.from === square || state.lastMove.to === square)) btn.classList.add("last-move");
-        if (square === checkedKingSquare) btn.classList.add("checked-king");
-        if (piece) {
-          const span = document.createElement("span");
-          span.className = "piece " + (piece.color === "w" ? "white" : "black");
-          span.innerHTML = `<img src="${PIECES[piece.color + piece.type]}" alt="" style="width:100%;height:100%;object-fit:contain;pointer-events:none" />`;
-          btn.appendChild(span);
-        }
-        if (state.legalTargets.includes(square)) {
-          const mark = document.createElement("span");
-          mark.className = piece ? "capture-ring" : "dot";
-          btn.appendChild(mark);
-        }
-        if (f === 0) {
-          const coord = document.createElement("span");
-          coord.className = "coord rank"; coord.textContent = square[1]; btn.appendChild(coord);
-        }
-        if (r === 7) {
-          const coord = document.createElement("span");
-          coord.className = "coord file"; coord.textContent = square[0]; btn.appendChild(coord);
-        }
-        btn.addEventListener("click", () => onSquareClick(square));
-        boardEl.appendChild(btn);
+    function computeLastMove(step) {
+      if (step === 0 || moveTimes.length === 0) return { from: null, to: null };
+      const g = new Chess();
+      let last = null;
+      for (let i = 0; i < step; i++) {
+        try { last = g.move(moves[i]); } catch(e) { break; }
       }
+      return { from: last ? last.from : null, to: last ? last.to : null };
     }
-  }
-  function onSquareClick(square) {
-    if (!state.game || !state.latestState || state.latestState.status === "checkmate" ||
-        ["stalemate", "threefold", "insufficient", "draw"].includes(state.latestState.status)) return;
-    if (state.latestState.turn !== state.color) return showNotice("It is not your turn.", true);
-    const piece = state.game.get(square);
-    if (state.selected && state.legalTargets.includes(square)) {
-      const moves = state.game.moves({ square: state.selected, verbose: true }).filter(m => m.to === square);
-      const promotionMoves = moves.filter(m => m.promotion);
-      if (promotionMoves.length) {
-        state.pendingPromotion = { from: state.selected, to: square };
-        promotionDialog.showModal();
+
+    function computeFenAtStep(step) {
+      const g = new Chess();
+      for (let i = 0; i < step; i++) {
+        try { g.move(moves[i]); } catch(e) { break; }
+      }
+      return g.fen();
+    }
+
+    function computeExactUsed() {
+      let wUsed = 0;
+      let bUsed = 0;
+      for (let i = 0; i < currentStep; i++) {
+        const prev = i > 0 ? moveTimes[i - 1] : 0;
+        const now = moveTimes[i];
+        if (typeof now !== "number") return { wUsed, bUsed };
+        const spent = Math.max(0, (now - prev) / 1000);
+        if (i % 2 === 0) wUsed += spent;
+        else bUsed += spent;
+      }
+      return { wUsed, bUsed };
+    }
+
+    function paintClocks() {
+      const whiteRemaining = Math.max(0, 600 - liveWUsed);
+      const blackRemaining = Math.max(0, 600 - liveBUsed);
+      $("whiteClock").textContent = fmtClock(Math.round(whiteRemaining));
+      $("blackClock").textContent = fmtClock(Math.round(blackRemaining));
+    }
+
+    function updateClocks() {
+      if (!gameMeta) return;
+      const ex = computeExactUsed();
+      liveWUsed = ex.wUsed;
+      liveBUsed = ex.bUsed;
+      paintClocks();
+    }
+
+    function startTicker() {
+      stopTicker();
+      tickTimer = setInterval(() => {
+        // Who is on the clock? Next move's color.
+        // currentStep = number of moves already played. Next move index = currentStep.
+        // Even index = white's move (white on clock). Odd = black on clock.
+        if (currentStep >= moves.length) return;
+        if (currentStep % 2 === 0) liveWUsed += 1;
+        else liveBUsed += 1;
+        paintClocks();
+      }, 1000);
+    }
+
+    function stopTicker() {
+      if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+    }
+
+    function render() {
+      renderBoardFromFen(computeFenAtStep(currentStep));
+      $("moveLabel").textContent = "Move " + currentStep + " / " + moves.length;
+      if (currentStep > 0) {
+        const idx = currentStep - 1;
+        const t = moveTimes[idx] !== undefined ? " (" + fmtMoveTime(moveTimes[idx]) + ")" : "";
+        $("currentMove").textContent = moves[idx] + t;
       } else {
-        socket.emit("move", { from: state.selected, to: square });
-        state.selected = null; state.legalTargets = []; renderBoard();
+        $("currentMove").textContent = "—";
       }
-      return;
+      $("prevBtn").disabled = currentStep === 0;
+      $("nextBtn").disabled = currentStep === moves.length;
+      updateClocks();
+      const rows = $("moveList").querySelectorAll(".move-pair");
+      const activeRow = Math.floor((currentStep - 1) / 2);
+      rows.forEach((el, i) => {
+        el.style.background = i === activeRow ? "rgba(155,201,108,.15)" : "";
+      });
+      if (playing) {
+        updateClocks();
+        startTicker();
+      }
     }
-    if (piece && piece.color === state.color) {
-      state.selected = square;
-      state.legalTargets = getLegalTargets(square);
-      renderBoard();
-    } else {
-      state.selected = null; state.legalTargets = []; renderBoard();
-    }
-  }
-  function renderHistory(history) {
-    const list = $("moveList");
-    list.innerHTML = "";
-    if (!history.length) {
-      const empty = document.createElement("div");
-      empty.className = "empty-moves"; empty.textContent = "Your opening move will appear here.";
-      list.appendChild(empty);
-    } else {
-      for (let i = 0; i < history.length; i += 2) {
+
+    function renderMoveList() {
+      const list = $("moveList");
+      list.innerHTML = "";
+      if (!moves.length) {
+        list.innerHTML = '<div class="empty-moves">No moves recorded</div>';
+        $("moveCount").textContent = "0 moves";
+        return;
+      }
+      for (let i = 0; i < moves.length; i += 2) {
         const pair = document.createElement("div");
         pair.className = "move-pair";
-        const no = document.createElement("span"); no.className = "move-no"; no.textContent = (Math.floor(i / 2) + 1) + ".";
-        const white = document.createElement("span"); white.className = "move-san"; white.textContent = history[i].san;
-        const black = document.createElement("span"); black.className = "move-san";
-        if (history[i + 1]) black.textContent = history[i + 1].san;
-        if (i + (history[i + 1] ? 1 : 0) === history.length - 1) (history[i + 1] || history[i]).san && (history[i + 1] ? black : white).classList.add("latest");
-        pair.append(no, white, black); list.appendChild(pair);
+        const t1 = moveTimes[i] !== undefined ? '<span class="move-time">(' + fmtMoveTime(moveTimes[i]) + ')</span>' : "";
+        const t2 = moveTimes[i+1] !== undefined ? '<span class="move-time">(' + fmtMoveTime(moveTimes[i+1]) + ')</span>' : "";
+        pair.innerHTML =
+          '<span class="move-no">' + (Math.floor(i/2)+1) + '.</span>' +
+          '<span class="move-san">' + moves[i] + t1 + '</span>' +
+          '<span class="move-san">' + (moves[i+1] || '') + t2 + '</span>';
+        list.appendChild(pair);
       }
-      list.scrollTop = list.scrollHeight;
+      $("moveCount").textContent = moves.length + " moves";
     }
-    $("moveCount").textContent = history.length + (history.length === 1 ? " move" : " moves");
-  }
-  const glyphOrder = {p:1,n:3,b:3,r:5,q:9,k:0};
-  function capturedPieces(history, capturedColor) {
-    const captured = history.filter(m => m.captured && m.color === (capturedColor === "w" ? "b" : "w"));
-    return captured.map(m => PIECES[capturedColor + m.captured]).join(" ") || "—";
-  }
-  function renderState(s) {
-    state.latestState = s;
-    try { state.game = new Chess(s.fen); } catch (_) { return showNotice("Could not read the latest board position.", true); }
-    if (state.selected && !state.game.get(state.selected)) { state.selected = null; state.legalTargets = []; }
-    const other = state.color === "w" ? "b" : "w";
-    const me = s.players[state.color];
-    const opponent = s.players[other];
-    $("selfName").textContent = me ? me.name + " (You)" : "You";
-    $("selfCaption").textContent = state.color === "w" ? "Playing White" : "Playing Black";
-    $("opponentName").textContent = opponent ? opponent.name : "Waiting for opponent";
-    $("opponentCaption").textContent = opponent ? (opponent.connected ? "Connected" : "Reconnecting…") : "Share the room code to invite them";
-    const isMyTurn = s.turn === state.color && s.status === "playing";
-    const isTheirTurn = s.turn === other && s.status === "playing";
-    const fmt = (sec) => {
-      if (typeof sec !== "number") return "10:00";
-      const m = Math.floor(sec / 60);
-      const r = sec % 60;
-      return m + ":" + String(r).padStart(2, "0");
-    };
-    $("selfClock").textContent = fmt(s.timeLeft ? s.timeLeft[state.color] : 600);
-    $("opponentClock").textContent = fmt(s.timeLeft ? s.timeLeft[other] : 600);
-    $("selfClock").classList.toggle("active-clock", isMyTurn);
-    $("opponentClock").classList.toggle("active-clock", isTheirTurn);
-    $("turnIndicator").innerHTML = '<i class="turn-dot"></i> ' + statusLine(s);
-    const badge = $("statusBadge");
-    badge.textContent = badgeText(s);
-    $("statusTitle").textContent = titleText(s);
-    $("statusDescription").textContent = descriptionText(s);
-    $("drawBtn").disabled = !opponent || s.status !== "playing";
-    $("resignBtn").disabled = !opponent || s.status !== "playing";
-    $("rematchBtn").classList.toggle("hidden", !["checkmate", "stalemate", "threefold", "insufficient", "draw"].includes(s.status));
-    $("rematchBtn").textContent = s.rematch && s.rematch[state.color] ? "✓ Rematch requested" : "↻ Request rematch";
-    $("capturedByYou").textContent = capturedPieces(s.history, state.color);
-    $("capturedByOpponent").textContent = capturedPieces(s.history, other);
-    renderHistory(s.history);
-    renderBoard();
-  }
-  function statusLine(s) {
-    if (!s.players.b) return "Waiting for opponent";
-    if (!s.players.w?.connected || !s.players.b?.connected) return "Player reconnecting";
-    if (s.status === "checkmate") return "Checkmate";
-    if (["stalemate", "threefold", "insufficient", "draw", "resigned"].includes(s.status)) return "Game drawn";
-    if (s.status === "check") return (s.turn === state.color ? "Your king is in check" : "Opponent is in check");
-    return s.turn === state.color ? "Your turn to move" : "Opponent's turn";
-  }
-  function badgeText(s) {
-    if (!s.players.b) return "WAITING";
-    if (s.status === "checkmate" || s.status === "resigned") return "GAME OVER";
-    if (["stalemate", "threefold", "insufficient", "draw", "resigned"].includes(s.status)) return "DRAW";
-    if (s.status === "check") return "CHECK";
-    return "IN PROGRESS";
-  }
-  function titleText(s) {
-    if (!s.players.b) return "Waiting for a challenger";
-    if (s.status === "resigned") return s.winner === state.color ? "Victory by resignation!" : "You resigned";
-    if (s.status === "checkmate") return (s.winner === state.color ? "Victory!" : "Game over") ;
-    if (s.status === "stalemate") return "Draw by stalemate";
-    if (s.status === "threefold") return "Draw by repetition";
-    if (s.status === "insufficient") return "Draw — insufficient material";
-    if (s.status === "draw") return "Game drawn";
-    if (s.status === "check") return "King in check";
-    return s.turn === state.color ? "Your move" : "Opponent is thinking";
-  }
-  function descriptionText(s) {
-    if (!s.players.b) return "Send your room code to a friend. The game starts when they join.";
-    if (s.status === "checkmate") return (s.winner === state.color ? "You won this game. Well played." : "Your opponent has won this game.") + " Request a rematch to play again.";
-    if (["stalemate", "threefold", "insufficient", "draw", "resigned"].includes(s.status)) return "The game ended in a draw. You can request a rematch.";
-    if (s.drawOffer && s.drawOffer !== state.color) return "Your opponent offered a draw. Press Offer draw to accept.";
-    if (s.drawOffer === state.color) return "Draw offered. Waiting for your opponent.";
-    if (!s.players[state.color]?.connected || !s.players[state.color === "w" ? "b" : "w"]?.connected) return "A player has disconnected. The same room can be rejoined using the saved browser session.";
-    return s.turn === state.color ? "Take your time and find the strongest move." : "Waiting for your opponent to make a move.";
-  }
-  function joinSuccess(data) {
-    state.code = data.code; state.color = data.color; state.token = data.token;
-    persistSession();
-    displayGame();
-    renderState(data.state);
-    showNotice("You are playing " + (state.color === "w" ? "White" : "Black") + ".");
-  }
 
-  $("createBtn").addEventListener("click", createRoom);
-  $("joinBtn").addEventListener("click", joinRoom);
-  $("roomCode").addEventListener("input", e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6); });
-  $("roomCode").addEventListener("keydown", e => { if (e.key === "Enter") joinRoom(); });
-  $("playerName").addEventListener("keydown", e => { if (e.key === "Enter") createRoom(); });
-  $("copyCodeBtn").addEventListener("click", copyCode);
-  $("copyInviteBtn").addEventListener("click", copyCode);
-  $("flipBtn").addEventListener("click", () => { state.flipped = !state.flipped; renderBoard(); });
-  $("leaveBtn").addEventListener("click", async () => {
-    const isAr = document.cookie.split('; ').some(c => c === 'lang=ar');
-    const ok = await cModal({
-      title: isAr ? 'مغادرة المباراة' : 'Leave Game',
-      message: isAr ? 'مغادرة هذه المباراة؟ يمكنك العودة بالرمز.' : 'Leave this match? You can rejoin with the room code while the room is available.',
-      okText: isAr ? 'مغادرة' : 'Leave',
-      danger: true
-    });
-    if (ok) {
-      sessionStorage.removeItem("chessRoomCode");
-      showLobby();
+    function step(d) {
+      currentStep = Math.max(0, Math.min(moves.length, currentStep + d));
+      render();
     }
-  });
-  $("drawBtn").addEventListener("click", () => socket.emit("offerDraw"));
-  $("resignBtn").addEventListener("click", async () => {
-    const isAr = document.cookie.split('; ').some(c => c === 'lang=ar');
-    const ok = await cModal({
-      title: isAr ? 'الاستسلام' : 'Resign',
-      message: isAr ? 'هل تريد الاستسلام؟ ستفقد هذه المباراة.' : 'Are you sure you want to resign this game?',
-      okText: isAr ? 'استسلم' : 'Resign',
-      danger: true
-    });
-    if (ok) socket.emit("resign");
-  });
-  $("rematchBtn").addEventListener("click", () => socket.emit("rematch"));
-  promotionDialog.querySelectorAll(".promo-piece").forEach(button => {
-    button.addEventListener("click", event => {
-      event.preventDefault();
-      const promotion = button.value;
-      const move = state.pendingPromotion;
-      promotionDialog.close();
-      state.pendingPromotion = null;
-      if (move) socket.emit("move", { from: move.from, to: move.to, promotion });
-      state.selected = null; state.legalTargets = []; renderBoard();
-    });
-  });
-  promotionDialog.querySelector(".cancel-promo").addEventListener("click", () => {
-    state.pendingPromotion = null; state.selected = null; state.legalTargets = []; renderBoard();
-  });
-  socket.on("connect", () => {
-    $("connectionText").textContent = "Connected";
-    document.querySelector(".live-dot").classList.add("connected");
-    const savedCode = sessionStorage.getItem("chessRoomCode");
-    const token = sessionStorage.getItem("chessPlayerToken");
-    if (savedCode && token && !state.code) socket.emit("reconnectRoom", { code: savedCode, token });
-  });
-  socket.on("disconnect", () => {
-    $("connectionText").textContent = "Reconnecting";
-    document.querySelector(".live-dot").classList.remove("connected");
-    if (!document.querySelector("#game").classList.contains("hidden")) showNotice("Connection lost. Reconnecting…", true);
-  });
-  socket.on("joined", joinSuccess);
-  socket.on("state", s => {
-    if (!state.code || s.code !== state.code) return;
-    renderState(s);
-  });
 
-  socket.on("clock", ({ timeLeft, turn }) => {
-    if (!state.code || !state.color) return;
-    const other = state.color === "w" ? "b" : "w";
-    const fmt = (sec) => {
-      if (typeof sec !== "number") return "10:00";
-      const m = Math.floor(sec / 60);
-      const r = sec % 60;
-      return m + ":" + String(r).padStart(2, "0");
-    };
-    $("selfClock").textContent = fmt(timeLeft[state.color]);
-    $("opponentClock").textContent = fmt(timeLeft[other]);
-    $("selfClock").classList.toggle("active-clock", turn === state.color);
-    $("opponentClock").classList.toggle("active-clock", turn === other);
-  });
-  socket.on("lastMove", move => { state.lastMove = move; state.selected = null; state.legalTargets = []; if (state.latestState) renderBoard(); });
-  socket.on("gameError", message => {
-    if ($("game").classList.contains("hidden")) lobbyError(message);
-    else showNotice(message, true);
-  });
-  socket.on("notice", message => showNotice(message));
-  const savedName = localStorage.getItem("chessPlayerName");
-  if (savedName) $("playerName").value = savedName;
-  $("playerName").addEventListener("change", () => localStorage.setItem("chessPlayerName", safeName()));
-  const savedCode = sessionStorage.getItem("chessRoomCode");
-  if (savedCode) $("roomCode").value = savedCode;
-})();--- END FILE: public/app.js ---
+    function togglePlay() {
+      if (playing) {
+        clearTimeout(playTimer);
+        playing = false;
+        $("playBtn").textContent = "▶ Play";
+        stopTicker();
+        return;
+      }
+      if (currentStep >= moves.length) currentStep = 0;
+      playing = true;
+      $("playBtn").textContent = "⏸ Pause";
+      updateClocks();
+      startTicker();
+      scheduleNext();
+    }
 
---- FILE: public/chess.min.js ---
-var Chess=function(r){var u="b",s="w",l=-1,_="p",A="n",S="b",m="r",y="q",p="k",t="pnbrqkPNBRQK",e="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",g=["1-0","0-1","1/2-1/2","*"],C={b:[16,32,17,15],w:[-16,-32,-17,-15]},T={n:[-18,-33,-31,-14,18,33,31,14],b:[-17,-15,17,15],r:[-16,1,16,-1],q:[-17,-16,-15,1,17,16,15,-1],k:[-17,-16,-15,1,17,16,15,-1]},c=[20,0,0,0,0,0,0,24,0,0,0,0,0,0,20,0,0,20,0,0,0,0,0,24,0,0,0,0,0,20,0,0,0,0,20,0,0,0,0,24,0,0,0,0,20,0,0,0,0,0,0,20,0,0,0,24,0,0,0,20,0,0,0,0,0,0,0,0,20,0,0,24,0,0,20,0,0,0,0,0,0,0,0,0,0,20,2,24,2,20,0,0,0,0,0,0,0,0,0,0,0,2,53,56,53,2,0,0,0,0,0,0,24,24,24,24,24,24,56,0,56,24,24,24,24,24,24,0,0,0,0,0,0,2,53,56,53,2,0,0,0,0,0,0,0,0,0,0,0,20,2,24,2,20,0,0,0,0,0,0,0,0,0,0,20,0,0,24,0,0,20,0,0,0,0,0,0,0,0,20,0,0,0,24,0,0,0,20,0,0,0,0,0,0,20,0,0,0,0,24,0,0,0,0,20,0,0,0,0,20,0,0,0,0,0,24,0,0,0,0,0,20,0,0,20,0,0,0,0,0,0,24,0,0,0,0,0,0,20],v=[17,0,0,0,0,0,0,16,0,0,0,0,0,0,15,0,0,17,0,0,0,0,0,16,0,0,0,0,0,15,0,0,0,0,17,0,0,0,0,16,0,0,0,0,15,0,0,0,0,0,0,17,0,0,0,16,0,0,0,15,0,0,0,0,0,0,0,0,17,0,0,16,0,0,15,0,0,0,0,0,0,0,0,0,0,17,0,16,0,15,0,0,0,0,0,0,0,0,0,0,0,0,17,16,15,0,0,0,0,0,0,0,1,1,1,1,1,1,1,0,-1,-1,-1,-1,-1,-1,-1,0,0,0,0,0,0,0,-15,-16,-17,0,0,0,0,0,0,0,0,0,0,0,0,-15,0,-16,0,-17,0,0,0,0,0,0,0,0,0,0,-15,0,0,-16,0,0,-17,0,0,0,0,0,0,0,0,-15,0,0,0,-16,0,0,0,-17,0,0,0,0,0,0,-15,0,0,0,0,-16,0,0,0,0,-17,0,0,0,0,-15,0,0,0,0,0,-16,0,0,0,0,0,-17,0,0,-15,0,0,0,0,0,0,-16,0,0,0,0,0,0,-17],h={p:0,n:1,b:2,r:3,q:4,k:5},o={NORMAL:"n",CAPTURE:"c",BIG_PAWN:"b",EP_CAPTURE:"e",PROMOTION:"p",KSIDE_CASTLE:"k",QSIDE_CASTLE:"q"},I={NORMAL:1,CAPTURE:2,BIG_PAWN:4,EP_CAPTURE:8,PROMOTION:16,KSIDE_CASTLE:32,QSIDE_CASTLE:64},P=7,w=6,L=1,R=0,N={a8:0,b8:1,c8:2,d8:3,e8:4,f8:5,g8:6,h8:7,a7:16,b7:17,c7:18,d7:19,e7:20,f7:21,g7:22,h7:23,a6:32,b6:33,c6:34,d6:35,e6:36,f6:37,g6:38,h6:39,a5:48,b5:49,c5:50,d5:51,e5:52,f5:53,g5:54,h5:55,a4:64,b4:65,c4:66,d4:67,e4:68,f4:69,g4:70,h4:71,a3:80,b3:81,c3:82,d3:83,e3:84,f3:85,g3:86,h3:87,a2:96,b2:97,c2:98,d2:99,e2:100,f2:101,g2:102,h2:103,a1:112,b1:113,c1:114,d1:115,e1:116,f1:117,g1:118,h1:119},E={w:[{square:N.a1,flag:I.QSIDE_CASTLE},{square:N.h1,flag:I.KSIDE_CASTLE}],b:[{square:N.a8,flag:I.QSIDE_CASTLE},{square:N.h8,flag:I.KSIDE_CASTLE}]},O=new Array(128),k={w:l,b:l},q=s,D={w:0,b:0},K=l,d=0,b=1,Q=[],U={};function x(r){void 0===r&&(r=!1),O=new Array(128),k={w:l,b:l},q=s,D={w:0,b:0},K=l,d=0,b=1,Q=[],r||(U={}),F(M())}function j(){B(e)}function B(r,e){void 0===e&&(e=!1);var n=r.split(/\s+/),t=n[0],o=0;if(!$(r).valid)return!1;x(e);for(var i=0;i<t.length;i++){var f=t.charAt(i);if("/"===f)o+=8;else if(-1!=="0123456789".indexOf(f))o+=parseInt(f,10);else{var a=f<"a"?s:u;W({type:f.toLowerCase(),color:a},fr(o)),o++}}return q=n[1],-1<n[2].indexOf("K")&&(D.w|=I.KSIDE_CASTLE),-1<n[2].indexOf("Q")&&(D.w|=I.QSIDE_CASTLE),-1<n[2].indexOf("k")&&(D.b|=I.KSIDE_CASTLE),-1<n[2].indexOf("q")&&(D.b|=I.QSIDE_CASTLE),K="-"===n[3]?l:N[n[3]],d=parseInt(n[4],10),b=parseInt(n[5],10),F(M()),!0}function $(r){var e="No errors.",n="FEN string must contain six space-delimited fields.",t="6th field (move number) must be a positive integer.",o="5th field (half move counter) must be a non-negative integer.",i="4th field (en-passant square) is invalid.",f="3rd field (castling availability) is invalid.",a="2nd field (side to move) is invalid.",l="1st field (piece positions) does not contain 8 '/'-delimited rows.",u="1st field (piece positions) is invalid [consecutive numbers].",s="1st field (piece positions) is invalid [invalid piece].",p="1st field (piece positions) is invalid [row too large].",c="Illegal en-passant square",v=r.split(/\s+/);if(6!==v.length)return{valid:!1,error_number:1,error:n};if(isNaN(v[5])||parseInt(v[5],10)<=0)return{valid:!1,error_number:2,error:t};if(isNaN(v[4])||parseInt(v[4],10)<0)return{valid:!1,error_number:3,error:o};if(!/^(-|[abcdefgh][36])$/.test(v[3]))return{valid:!1,error_number:4,error:i};if(!/^(KQ?k?q?|Qk?q?|kq?|q|-)$/.test(v[2]))return{valid:!1,error_number:5,error:f};if(!/^(w|b)$/.test(v[1]))return{valid:!1,error_number:6,error:a};var g=v[0].split("/");if(8!==g.length)return{valid:!1,error_number:7,error:l};for(var h=0;h<g.length;h++){for(var E=0,d=!1,b=0;b<g[h].length;b++)if(isNaN(g[h][b])){if(!/^[prnbqkPRNBQK]$/.test(g[h][b]))return{valid:!1,error_number:9,error:s};E+=1,d=!1}else{if(d)return{valid:!1,error_number:8,error:u};E+=parseInt(g[h][b],10),d=!0}if(8!==E)return{valid:!1,error_number:10,error:p}}return"3"==v[3][1]&&"w"==v[1]||"6"==v[3][1]&&"b"==v[1]?{valid:!1,error_number:11,error:c}:{valid:!0,error_number:0,error:e}}function M(){for(var r=0,e="",n=N.a8;n<=N.h1;n++){if(null==O[n])r++;else{0<r&&(e+=r,r=0);var t=O[n].color,o=O[n].type;e+=t===s?o.toUpperCase():o.toLowerCase()}n+1&136&&(0<r&&(e+=r),n!==N.h1&&(e+="/"),r=0,n+=8)}var i="";D[s]&I.KSIDE_CASTLE&&(i+="K"),D[s]&I.QSIDE_CASTLE&&(i+="Q"),D[u]&I.KSIDE_CASTLE&&(i+="k"),D[u]&I.QSIDE_CASTLE&&(i+="q"),i=i||"-";var f=K===l?"-":fr(K);return[e,q,i,f,d,b].join(" ")}function G(r){for(var e=0;e<r.length;e+=2)"string"==typeof r[e]&&"string"==typeof r[e+1]&&(U[r[e]]=r[e+1]);return U}function F(r){0<Q.length||(r!==e?(U.SetUp="1",U.FEN=r):(delete U.SetUp,delete U.FEN))}function i(r){var e=O[N[r]];return e?{type:e.type,color:e.color}:null}function W(r,e){if(!("type"in r&&"color"in r))return!1;if(-1===t.indexOf(r.type.toLowerCase()))return!1;if(!(e in N))return!1;var n=N[e];return(r.type!=p||k[r.color]==l||k[r.color]==n)&&(O[n]={type:r.type,color:r.color},r.type===p&&(k[r.color]=n),F(M()),!0)}function H(r,e,n,t,o){var i={color:q,from:e,to:n,flags:t,piece:r[e].type};return o&&(i.flags|=I.PROMOTION,i.promotion=o),r[n]?i.captured=r[n].type:t&I.EP_CAPTURE&&(i.captured=_),i}function Z(r){function e(r,e,n,t,o){if(r[n].type!==_||or(t)!==R&&or(t)!==P)e.push(H(r,n,t,o));else for(var i=[y,m,S,A],f=0,a=i.length;f<a;f++)e.push(H(r,n,t,o,i[f]))}var n=[],t=q,o=ar(t),i={b:L,w:w},f=N.a8,a=N.h1,l=!1,u=!(void 0!==r&&"legal"in r)||r.legal;if(void 0!==r&&"square"in r){if(!(r.square in N))return[];f=a=N[r.square],l=!0}for(var s=f;s<=a;s++)if(136&s)s+=7;else{var p=O[s];if(null!=p&&p.color===t)if(p.type===_){var c=s+C[t][0];if(null==O[c]){e(O,n,s,c,I.NORMAL);c=s+C[t][1];i[t]===or(s)&&null==O[c]&&e(O,n,s,c,I.BIG_PAWN)}for(v=2;v<4;v++){136&(c=s+C[t][v])||(null!=O[c]&&O[c].color===o?e(O,n,s,c,I.CAPTURE):c===K&&e(O,n,s,K,I.EP_CAPTURE))}}else for(var v=0,g=T[p.type].length;v<g;v++){var h=T[p.type][v];for(c=s;!(136&(c+=h));){if(null!=O[c]){if(O[c].color===t)break;e(O,n,s,c,I.CAPTURE);break}if(e(O,n,s,c,I.NORMAL),"n"===p.type||"k"===p.type)break}}}if(!l||a===k[t]){if(D[t]&I.KSIDE_CASTLE){var E=(d=k[t])+2;null!=O[d+1]||null!=O[E]||V(o,k[t])||V(o,d+1)||V(o,E)||e(O,n,k[t],E,I.KSIDE_CASTLE)}if(D[t]&I.QSIDE_CASTLE){var d;E=(d=k[t])-2;null!=O[d-1]||null!=O[d-2]||null!=O[d-3]||V(o,k[t])||V(o,d-1)||V(o,E)||e(O,n,k[t],E,I.QSIDE_CASTLE)}}if(!u)return n;var b=[];for(s=0,g=n.length;s<g;s++)er(n[s]),X(t)||b.push(n[s]),nr();return b}function z(r,e){var n="";if(r.flags&I.KSIDE_CASTLE)n="O-O";else if(r.flags&I.QSIDE_CASTLE)n="O-O-O";else{var t=function(r,e){for(var n=Z({legal:!e}),t=r.from,o=r.to,i=r.piece,f=0,a=0,l=0,u=0,s=n.length;u<s;u++){var p=n[u].from,c=n[u].to,v=n[u].piece;i===v&&t!==p&&o===c&&(f++,or(t)===or(p)&&a++,ir(t)===ir(p)&&l++)}if(0<f)return 0<a&&0<l?fr(t):0<l?fr(t).charAt(1):fr(t).charAt(0);return""}(r,e);r.piece!==_&&(n+=r.piece.toUpperCase()+t),r.flags&(I.CAPTURE|I.EP_CAPTURE)&&(r.piece===_&&(n+=fr(r.from)[0]),n+="x"),n+=fr(r.to),r.flags&I.PROMOTION&&(n+="="+r.promotion.toUpperCase())}return er(r),f()&&(a()?n+="#":n+="+"),nr(),n}function J(r){return r.replace(/=/,"").replace(/[+#]?[?!]*$/,"")}function V(r,e){for(var n=N.a8;n<=N.h1;n++)if(136&n)n+=7;else if(null!=O[n]&&O[n].color===r){var t=O[n],o=n-e,i=119+o;if(c[i]&1<<h[t.type]){if(t.type===_){if(0<o){if(t.color===s)return!0}else if(t.color===u)return!0;continue}if("n"===t.type||"k"===t.type)return!0;for(var f=v[i],a=n+f,l=!1;a!==e;){if(null!=O[a]){l=!0;break}a+=f}if(!l)return!0}}return!1}function X(r){return V(ar(r),k[r])}function f(){return X(q)}function a(){return f()&&0===Z().length}function n(){return!f()&&0===Z().length}function Y(){for(var r={},e=[],n=0,t=0,o=N.a8;o<=N.h1;o++)if(t=(t+1)%2,136&o)o+=7;else{var i=O[o];i&&(r[i.type]=i.type in r?r[i.type]+1:1,i.type===S&&e.push(t),n++)}if(2===n)return!0;if(3===n&&(1===r[S]||1===r[A]))return!0;if(n===r[S]+2){var f=0,a=e.length;for(o=0;o<a;o++)f+=e[o];if(0===f||f===a)return!0}return!1}function rr(){for(var r=[],e={},n=!1;;){var t=nr();if(!t)break;r.push(t)}for(;;){var o=M().split(" ").slice(0,4).join(" ");if(e[o]=o in e?e[o]+1:1,3<=e[o]&&(n=!0),!r.length)break;er(r.pop())}return n}function er(r){var e,n=q,t=ar(n);if(e=r,Q.push({move:e,kings:{b:k.b,w:k.w},turn:q,castling:{b:D.b,w:D.w},ep_square:K,half_moves:d,move_number:b}),O[r.to]=O[r.from],O[r.from]=null,r.flags&I.EP_CAPTURE&&(q===u?O[r.to-16]=null:O[r.to+16]=null),r.flags&I.PROMOTION&&(O[r.to]={type:r.promotion,color:n}),O[r.to].type===p){if(k[O[r.to].color]=r.to,r.flags&I.KSIDE_CASTLE){var o=r.to-1,i=r.to+1;O[o]=O[i],O[i]=null}else if(r.flags&I.QSIDE_CASTLE){o=r.to+1,i=r.to-2;O[o]=O[i],O[i]=null}D[n]=""}if(D[n])for(var f=0,a=E[n].length;f<a;f++)if(r.from===E[n][f].square&&D[n]&E[n][f].flag){D[n]^=E[n][f].flag;break}if(D[t])for(f=0,a=E[t].length;f<a;f++)if(r.to===E[t][f].square&&D[t]&E[t][f].flag){D[t]^=E[t][f].flag;break}K=r.flags&I.BIG_PAWN?"b"===q?r.to-16:r.to+16:l,r.piece===_||r.flags&(I.CAPTURE|I.EP_CAPTURE)?d=0:d++,q===u&&b++,q=ar(q)}function nr(){var r=Q.pop();if(null==r)return null;var e=r.move;k=r.kings,q=r.turn,D=r.castling,K=r.ep_square,d=r.half_moves,b=r.move_number;var n,t,o=q,i=ar(q);if(O[e.from]=O[e.to],O[e.from].type=e.piece,O[e.to]=null,e.flags&I.CAPTURE)O[e.to]={type:e.captured,color:i};else if(e.flags&I.EP_CAPTURE){var f;f=o===u?e.to-16:e.to+16,O[f]={type:_,color:i}}e.flags&(I.KSIDE_CASTLE|I.QSIDE_CASTLE)&&(e.flags&I.KSIDE_CASTLE?(n=e.to+1,t=e.to-1):e.flags&I.QSIDE_CASTLE&&(n=e.to-2,t=e.to+1),O[n]=O[t],O[t]=null);return e}function tr(r,e){var n=J(r);if(e){var t=n.match(/([pnbrqkPNBRQK])?([a-h][1-8])x?-?([a-h][1-8])([qrbnQRBN])?/);if(t)var o=t[1],i=t[2],f=t[3],a=t[4]}for(var l=Z(),u=0,s=l.length;u<s;u++){if(n===J(z(l[u]))||e&&n===J(z(l[u],!0)))return l[u];if(t&&(!o||o.toLowerCase()==l[u].piece)&&N[i]==l[u].from&&N[f]==l[u].to&&(!a||a.toLowerCase()==l[u].promotion))return l[u]}return null}function or(r){return r>>4}function ir(r){return 15&r}function fr(r){var e=ir(r),n=or(r);return"abcdefgh".substring(e,e+1)+"87654321".substring(n,n+1)}function ar(r){return r===s?u:s}function lr(r){var e=function r(e){var n=e instanceof Array?[]:{};for(var t in e)n[t]="object"==typeof t?r(e[t]):e[t];return n}(r);e.san=z(e,!1),e.to=fr(e.to),e.from=fr(e.from);var n="";for(var t in I)I[t]&e.flags&&(n+=o[t]);return e.flags=n,e}function ur(r){return r.replace(/^\s+|\s+$/g,"")}return B(void 0===r?e:r),{WHITE:s,BLACK:u,PAWN:_,KNIGHT:A,BISHOP:S,ROOK:m,QUEEN:y,KING:p,SQUARES:function(){for(var r=[],e=N.a8;e<=N.h1;e++)136&e?e+=7:r.push(fr(e));return r}(),FLAGS:o,load:function(r){return B(r)},reset:function(){return j()},moves:function(r){for(var e=Z(r),n=[],t=0,o=e.length;t<o;t++)void 0!==r&&"verbose"in r&&r.verbose?n.push(lr(e[t])):n.push(z(e[t],!1));return n},in_check:function(){return f()},in_checkmate:function(){return a()},in_stalemate:function(){return n()},in_draw:function(){return 100<=d||n()||Y()||rr()},insufficient_material:function(){return Y()},in_threefold_repetition:function(){return rr()},game_over:function(){return 100<=d||a()||n()||Y()||rr()},validate_fen:function(r){return $(r)},fen:function(){return M()},board:function(){for(var r=[],e=[],n=N.a8;n<=N.h1;n++)null==O[n]?e.push(null):e.push({type:O[n].type,color:O[n].color}),n+1&136&&(r.push(e),e=[],n+=8);return r},pgn:function(r){var e="object"==typeof r&&"string"==typeof r.newline_char?r.newline_char:"\n",n="object"==typeof r&&"number"==typeof r.max_width?r.max_width:0,t=[],o=!1;for(var i in U)t.push("["+i+' "'+U[i]+'"]'+e),o=!0;o&&Q.length&&t.push(e);for(var f=[];0<Q.length;)f.push(nr());for(var a=[],l="";0<f.length;){var u=f.pop();Q.length||"b"!==u.color?"w"===u.color&&(l.length&&a.push(l),l=b+"."):l=b+". ...",l=l+" "+z(u,!1),er(u)}if(l.length&&a.push(l),void 0!==U.Result&&a.push(U.Result),0===n)return t.join("")+a.join(" ");var s=0;for(i=0;i<a.length;i++)s+a[i].length>n&&0!==i?(" "===t[t.length-1]&&t.pop(),t.push(e),s=0):0!==i&&(t.push(" "),s++),t.push(a[i]),s+=a[i].length;return t.join("")},load_pgn:function(r,e){var n=void 0!==e&&"sloppy"in e&&e.sloppy;function l(r){return r.replace(/\\/g,"\\")}var t="object"==typeof e&&"string"==typeof e.newline_char?e.newline_char:"\r?\n",o=new RegExp("^(\\[((?:"+l(t)+")|.)*\\])(?:"+l(t)+"){2}"),i=o.test(r)?o.exec(r)[1]:"";j();var f=function(r,e){for(var n="object"==typeof e&&"string"==typeof e.newline_char?e.newline_char:"\r?\n",t={},o=r.split(new RegExp(l(n))),i="",f="",a=0;a<o.length;a++)i=o[a].replace(/^\[([A-Z][A-Za-z]*)\s.*\]$/,"$1"),f=o[a].replace(/^\[[A-Za-z]+\s"(.*)"\]$/,"$1"),0<ur(i).length&&(t[i]=f);return t}(i,e);for(var a in f)G([a,f[a]]);if("1"===f.SetUp&&!("FEN"in f&&B(f.FEN,!0)))return!1;var u=r.replace(i,"").replace(new RegExp(l(t),"g")," ");u=u.replace(/(\{[^}]+\})+?/g,"");for(var s=/(\([^\(\)]+\))+?/g;s.test(u);)u=u.replace(s,"");var p=ur(u=(u=(u=u.replace(/\d+\.(\.\.)?/g,"")).replace(/\.\.\./g,"")).replace(/\$\d+/g,"")).split(new RegExp(/\s+/));p=p.join(",").replace(/,,+/g,",").split(",");for(var c="",v=0;v<p.length-1;v++){if(null==(c=tr(p[v],n)))return!1;er(c)}if(c=p[p.length-1],-1<g.indexOf(c))!function(r){for(var e in r)return 1}(U)||void 0!==U.Result||G(["Result",c]);else{if(null==(c=tr(c,n)))return!1;er(c)}return!0},header:function(){return G(arguments)},ascii:function(){return function(){for(var r="   +------------------------+\n",e=N.a8;e<=N.h1;e++){if(0===ir(e)&&(r+=" "+"87654321"[or(e)]+" |"),null==O[e])r+=" . ";else{var n=O[e].type;r+=" "+(O[e].color===s?n.toUpperCase():n.toLowerCase())+" "}e+1&136&&(r+="|\n",e+=8)}return r+="   +------------------------+\n",r+="     a  b  c  d  e  f  g  h\n"}()},turn:function(){return q},move:function(r,e){var n=void 0!==e&&"sloppy"in e&&e.sloppy,t=null;if("string"==typeof r)t=tr(r,n);else if("object"==typeof r)for(var o=Z(),i=0,f=o.length;i<f;i++)if(!(r.from!==fr(o[i].from)||r.to!==fr(o[i].to)||"promotion"in o[i]&&r.promotion!==o[i].promotion)){t=o[i];break}if(!t)return null;var a=lr(t);return er(t),a},undo:function(){var r=nr();return r?lr(r):null},clear:function(){return x()},put:function(r,e){return W(r,e)},get:function(r){return i(r)},remove:function(r){return n=i(e=r),O[N[e]]=null,n&&n.type===p&&(k[n.color]=l),F(M()),n;var e,n},perft:function(r){return function r(e){for(var n=Z({legal:!1}),t=0,o=q,i=0,f=n.length;i<f;i++)er(n[i]),X(o)||(0<e-1?t+=r(e-1):t++),nr();return t}(r)},square_color:function(r){if(r in N){var e=N[r];return(or(e)+ir(e))%2==0?"light":"dark"}return null},history:function(r){for(var e=[],n=[],t=(void 0!==r&&"verbose"in r&&r.verbose);0<Q.length;)e.push(nr());for(;0<e.length;){var o=e.pop();t?n.push(lr(o)):n.push(z(o)),er(o)}return n}}};"undefined"!=typeof exports&&(exports.Chess=Chess),"undefined"!=typeof define&&define(function(){return Chess});--- END FILE: public/chess.min.js ---
+    function scheduleNext() {
+      if (!playing) return;
+      if (currentStep >= moves.length) {
+        playing = false;
+        $("playBtn").textContent = "▶ Play";
+        stopTicker();
+        return;
+      }
+      let delay;
+      if (speedMode === 'realtime') {
+        const prevTime = currentStep > 0 ? (moveTimes[currentStep - 1] || 0) : 0;
+        const thisTime = moveTimes[currentStep] || (prevTime + 800);
+        delay = Math.max(150, thisTime - prevTime);
+      } else {
+        delay = 800;
+      }
+      playTimer = setTimeout(() => {
+        currentStep++;
+        render();
+        scheduleNext();
+      }, delay);
+    }
+
+    async function load() {
+      if (!id) { $("result").textContent = "No game id"; return; }
+      try {
+        const r = await fetch("/api/games/" + id);
+        const d = await r.json();
+        if (!d.game) { $("result").textContent = "Game not found"; return; }
+        const g = d.game;
+        gameMeta = g;
+        $("whiteName").textContent = g.player_white || "White";
+        $("blackName").textContent = g.player_black || "Black";
+        $("result").textContent = (g.result || "") + (g.winner ? " — winner: " + g.winner : "");
+        moves = (g.moves || "").trim().split(/\s+/).filter(Boolean);
+        try { moveTimes = JSON.parse(g.move_times || "[]"); } catch(e) { moveTimes = []; }
+        renderMoveList();
+        render();
+      } catch (e) {
+        $("result").textContent = "Failed to load";
+      }
+    }
+
+    document.addEventListener("keydown", function(e) {
+      if (e.key === "ArrowLeft") step(-1);
+      if (e.key === "ArrowRight") step(1);
+      if (e.key === " ") { e.preventDefault(); togglePlay(); }
+    });
+
+    load();
+  </script>
+</body>
+</html>
+--- END FILE: public/replay.html ---
 
 --- FILE: public/style.css ---
 /* ==========================================================================
@@ -1463,975 +2355,1069 @@ body.embedded .top-status .live-dot {
 
 /* RTL support */
 .chess-modal[dir="rtl"] .chess-modal-actions { justify-content: flex-start; }
---- END FILE: public/style.css ---
 
---- FILE: public/styles.css ---
-/* ==========================================================================
-   CHESS — compact premium UI. IDs and classes match app.js exactly.
-   ========================================================================== */
-
-:root {
-  color-scheme: dark;
-  --bg: #141210;
-  --bg-2: #1a1714;
-  --surface: #1f1c18;
-  --surface-2: #26221d;
-  --line: #302b24;
-  --line-2: #3d372e;
-  --ink: #f2ecdf;
-  --ink-soft: #b8afa0;
-  --muted: #8a8172;
-  --accent: #c9a15f;       /* warm gold */
-  --accent-soft: #e6c98f;
-  --olive: #7fa650;
-  --danger: #e0684f;
-  --cream: #f0e6d2;
-  --radius: 14px;
-  --radius-lg: 20px;
-  --font: 'Inter', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-}
-
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { min-height: 100%; }
-
-body {
-  background:
-    radial-gradient(ellipse at 50% -30%, rgba(201, 161, 95, 0.08), transparent 55%),
-    radial-gradient(ellipse at 100% 100%, rgba(127, 166, 80, 0.05), transparent 50%),
-    var(--bg);
-  color: var(--ink);
-  font-family: var(--font);
-  font-size: 14px;
-  line-height: 1.5;
-  overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
-}
-
-/* ============ HEADER ============ */
-.topbar {
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--line);
-  background: rgba(20, 18, 16, 0.8);
-  backdrop-filter: blur(8px);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  text-decoration: none;
-  color: var(--ink);
-}
-
-.brand-mark {
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-  background: var(--accent);
-  color: #1a1410;
-  display: grid;
-  place-items: center;
-  font-size: 20px;
-  font-weight: 700;
-}
-
-.brand-name {
-  font-weight: 800;
-  font-size: 13px;
-  letter-spacing: 2px;
-}
-
-.top-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--ink-soft);
-}
-
-.live-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #d99a55;
-  transition: all .3s;
-}
-
-.live-dot.connected {
-  background: var(--olive);
-  box-shadow: 0 0 10px var(--olive);
-}
-
-/* ============ LAYOUT ============ */
-.layout {
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 24px 20px 40px;
-}
-
-/* ============ LOBBY ============ */
-.lobby {
-  max-width: 440px;
-  margin: 0 auto;
-}
-
-.hero {
-  text-align: center;
-  margin-bottom: 28px;
-}
-
-.eyebrow {
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  color: var(--accent);
-  padding: 6px 12px;
-  border: 1px solid rgba(201, 161, 95, 0.3);
-  border-radius: 999px;
-  margin-bottom: 16px;
-}
-
-.hero h1 {
-  font-size: clamp(32px, 6vw, 48px);
-  font-weight: 800;
-  letter-spacing: -1.5px;
-  line-height: 1.05;
-  margin-bottom: 12px;
-  color: var(--ink);
-}
-
-.hero h1 em {
-  font-style: italic;
-  font-weight: 500;
-  color: var(--accent);
-}
-
-.hero p {
-  color: var(--ink-soft);
-  font-size: 14px;
-  line-height: 1.6;
-  max-width: 340px;
-  margin: 0 auto;
-}
-
-.card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  padding: 22px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
-}
-
-.card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
-}
-
-.card-head .label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  color: var(--muted);
-}
-
-.card-head .icon {
-  font-size: 26px;
-  color: var(--accent);
-  opacity: 0.85;
-}
-
-.field-label {
-  display: block;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  color: var(--muted);
-  margin: 16px 0 8px;
-}
-
-.text-input {
-  width: 100%;
-  height: 46px;
-  background: var(--bg-2);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 0 14px;
-  color: var(--ink);
-  font: 500 15px var(--font);
-  outline: none;
-  transition: all .15s;
-}
-
-.text-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(201, 161, 95, 0.15);
-}
-
-.text-input::placeholder { color: #5a5347; }
-
-.code-input {
-  letter-spacing: 4px;
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 16px;
-  text-align: center;
-  text-transform: uppercase;
-}
-
-/* ============ BUTTONS ============ */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 46px;
-  padding: 0 18px;
-  border: none;
-  border-radius: 10px;
-  font: 700 14px var(--font);
-  cursor: pointer;
-  transition: all .15s;
-  text-decoration: none;
-}
-
-.btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
-.btn:active { transform: translateY(0); }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-
-.btn-primary {
-  background: var(--accent);
-  color: #1a1410;
-}
-
-.btn-create {
-  width: 100%;
-  margin-top: 16px;
-  justify-content: space-between;
-  padding: 0 18px;
-}
-
-.btn-create .arrow {
-  font-size: 18px;
-}
-
-.btn-secondary {
-  background: var(--surface-2);
-  color: var(--ink);
-  border: 1px solid var(--line-2);
-}
-
-.btn-danger {
-  background: rgba(224, 104, 79, 0.12);
-  color: var(--danger);
-  border: 1px solid rgba(224, 104, 79, 0.35);
-}
-
-.btn-ghost {
-  background: transparent;
-  color: var(--ink-soft);
-  border: 1px solid var(--line);
-}
-
-.btn-ghost-sm {
-  background: transparent;
-  color: var(--ink-soft);
-  border: 1px solid var(--line);
-  padding: 6px 12px;
-  font-size: 11px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 600;
-  transition: all .15s;
-}
-
-.btn-ghost-sm:hover {
-  color: var(--ink);
-  border-color: var(--line-2);
-}
-
-.divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 20px 0 4px;
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-}
-
-.divider::before,
-.divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--line);
-}
-
-.join-row {
-  display: flex;
-  gap: 8px;
-}
-
-.join-row .text-input { flex: 1; min-width: 0; }
-.join-row .btn { padding: 0 18px; flex-shrink: 0; }
-
-.error-text {
-  color: var(--danger);
-  font-size: 12px;
-  margin-top: 10px;
-  min-height: 14px;
-}
-
-.privacy-note {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 16px;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-/* ============ GAME VIEW ============ */
-.game-shell {
+/* ============ CHAT PANEL ============ */
+.chat-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  height: 220px;
 }
-
-.game-topline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 18px;
-  background: var(--surface);
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--bg-2);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-
-.game-topline .label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  color: var(--muted);
-  display: block;
-  margin-bottom: 2px;
-}
-
-.room-line {
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 18px;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-msg {
+  word-break: break-word;
+  line-height: 1.4;
+}
+.chat-msg span.chat-user {
+  font-weight: 700;
+  color: var(--olive, var(--accent));
+  margin-right: 4px;
+}
+.chat-form {
+  display: flex;
+  gap: 6px;
+}
+.chat-form .text-input {
+  height: 36px;
+  font-size: 13px;
+  padding: 0 10px;
+}
+.chat-form .btn {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 12px;
 }
 
-.room-line strong {
-  font-family: var(--font-mono);
-  font-weight: 800;
-  letter-spacing: 3px;
-  color: var(--accent);
-}
-
-.copy-btn {
-  background: transparent;
-  border: none;
-  color: var(--accent);
-  font: 700 11px var(--font);
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-  transition: background .15s;
-}
-
-.copy-btn:hover { background: rgba(201, 161, 95, 0.1); }
-
+/* ============ SPACIOUS GAME + CHAT LAYOUT ============ */
+.layout { max-width: 1420px; padding: 16px 18px 28px; }
 .game-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(350px, .78fr);
+  gap: 14px;
   align-items: start;
 }
+.board-panel { padding: 10px; }
+.side-panel { gap: 8px; min-width: 0; }
+.panel { padding: 11px; }
 
-/* Board panel */
-.board-panel {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+/* Chat is the primary side-panel feature */
+.side-panel > .chat-panel,
+.chat-panel {
+  order: -1;
+  height: clamp(340px, calc(100vh - 210px), 620px);
+  min-height: 340px;
   padding: 12px;
-}
-
-.player-strip {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 2px 10px;
-}
-
-.self-strip {
-  padding: 10px 2px 6px;
-}
-
-.avatar {
-  width: 32px;
-  height: 32px;
-  flex-shrink: 0;
-  border-radius: 8px;
-  display: grid;
-  place-items: center;
-  font-size: 20px;
-  background: var(--surface-2);
-  color: var(--ink-soft);
-  border: 1px solid var(--line);
-}
-
-.self-avatar {
-  background: var(--accent);
-  color: #1a1410;
-  border-color: var(--accent);
-}
-
-.player-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-}
-
-.player-info strong {
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.player-info span {
-  font-size: 10px;
-  color: var(--muted);
-}
-
-.clock {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 700;
-  padding: 5px 10px;
-  border-radius: 6px;
-  background: var(--bg-2);
-  color: var(--ink-soft);
-  border: 1px solid var(--line);
-}
-
-.clock.active-clock {
-  background: var(--accent);
-  color: #1a1410;
-  border-color: var(--accent);
-}
-
-/* Chess board */
-.board-frame {
-  border-radius: 4px;
-  overflow: hidden;
-  border: 3px solid var(--line-2);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-}
-
-.board {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  touch-action: manipulation;
-  user-select: none;
-}
-
-.square {
-  position: relative;
-  border: none;
-  padding: 0;
-  aspect-ratio: 1 / 1;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  min-width: 0;
-  transition: background .1s;
-}
-
-.square.light { background: #eeeed2; }
-.square.dark  { background: #769656; }
-
-.square.selected { box-shadow: inset 0 0 0 3px var(--accent); }
-.square.last-move { background-image: linear-gradient(rgba(201, 161, 95, 0.35), rgba(201, 161, 95, 0.35)); }
-
-.piece {
-  font-family: 'Segoe UI Symbol', 'Noto Sans Symbols 2', serif;
-  font-size: clamp(26px, 5.5vw, 46px);
-  line-height: 1;
-  z-index: 2;
-  position: relative;
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
-}
-
-.piece.white {
-  color: #fffdf5;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 1px 0 rgba(0, 0, 0, 0.5), -1px 0 rgba(0, 0, 0, 0.5), 0 -1px rgba(0, 0, 0, 0.5);
-}
-
-.piece.black {
-  color: #1f1a14;
-  text-shadow: 0 1px 0 rgba(240, 230, 210, 0.5);
-}
-
-.square .dot {
-  position: absolute;
-  width: 22%;
-  height: 22%;
-  border-radius: 50%;
-  background: rgba(26, 20, 16, 0.35);
-  z-index: 3;
-}
-
-.square .capture-ring {
-  position: absolute;
-  inset: 5%;
-  border-radius: 50%;
-  border: 3px solid rgba(26, 20, 16, 0.4);
-  z-index: 3;
-}
-
-.square .coord {
-  position: absolute;
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1;
-  pointer-events: none;
-  z-index: 4;
-}
-
-.square .coord.rank { top: 3px; left: 3px; }
-.square .coord.file { bottom: 3px; right: 3px; }
-.square.light .coord { color: #7a6549; }
-.square.dark .coord { color: #f0e6d2; }
-
-.board-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 10px;
-  gap: 10px;
-}
-
-.board-footer > span {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--ink-soft);
-}
-
-.turn-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-
-/* Side panel */
-.side-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.panel {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 14px;
+  min-width: 0;
 }
-
-.panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-
-.panel-head .label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  color: var(--muted);
-}
-
-.status-badge {
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 1px;
-  color: var(--accent);
-  background: rgba(201, 161, 95, 0.1);
-  border: 1px solid rgba(201, 161, 95, 0.3);
-  padding: 4px 8px;
-  border-radius: 5px;
-}
-
-.status-panel h3 {
-  font-size: 16px;
-  font-weight: 700;
-  margin-bottom: 4px;
-  color: var(--ink);
-}
-
-.status-panel > p {
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--muted);
-}
-
-.invite-box {
-  margin-top: 12px;
-  padding: 10px 12px;
-  background: var(--bg-2);
-  border: 1px dashed var(--line-2);
-  border-radius: 9px;
-}
-
-.invite-box > span {
-  display: block;
-  font-size: 9px;
-  letter-spacing: 1.5px;
-  color: var(--muted);
-  margin-bottom: 6px;
-}
-
-.invite-box > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.invite-box strong {
-  font-family: var(--font-mono);
-  font-size: 20px;
-  font-weight: 800;
-  letter-spacing: 4px;
-  color: var(--accent);
-}
-
-.moves-panel .panel-head h3 {
+.chat-messages {
+  min-height: 0;
+  padding: 12px;
+  gap: 9px;
   font-size: 13px;
-  font-weight: 700;
-}
-
-.moves-panel .panel-head > span {
-  font-size: 10px;
-  color: var(--muted);
-}
-
-.move-list {
-  max-height: 200px;
-  overflow-y: auto;
-  margin: 0 -4px;
-}
-
-.empty-moves {
-  text-align: center;
-  padding: 16px 8px;
-  color: var(--muted);
-  font-size: 11px;
-  font-style: italic;
-}
-
-.move-pair {
-  display: grid;
-  grid-template-columns: 24px 1fr 1fr;
-  gap: 6px;
-  padding: 5px 8px;
-  border-radius: 6px;
-  font-size: 11px;
-}
-
-.move-pair:nth-child(even) {
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.move-no {
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 10px;
-}
-
-.move-san {
-  font-weight: 600;
-  color: var(--ink-soft);
-  font-family: var(--font-mono);
-}
-
-.move-san.latest { color: var(--accent); }
-
-.captured-panel .label {
-  display: block;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  color: var(--muted);
-  margin-bottom: 10px;
-}
-
-.captured-row {
-  display: grid;
-  grid-template-columns: 65px 1fr;
-  gap: 6px;
-  align-items: center;
-  margin-top: 6px;
-}
-
-.captured-row > span {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  color: var(--muted);
-}
-
-.captured-pieces {
-  font-size: 18px;
-  letter-spacing: -2px;
-  min-height: 20px;
-  color: var(--cream);
-  overflow-wrap: anywhere;
-}
-
-.action-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.action-row .btn { min-height: 40px; font-size: 12px; }
-
-.rematch-btn {
-  width: 100%;
-  min-height: 42px;
-}
-
-.hidden { display: none !important; }
-
-.game-notice {
-  min-height: 16px;
-  text-align: center;
-  font-size: 12px;
-  color: var(--accent);
-  margin-top: 6px;
-}
-
-.error-toast { color: var(--danger) !important; }
-
-/* ============ PROMOTION DIALOG ============ */
-.promotion-dialog {
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  color: var(--ink);
-  padding: 24px;
-  width: min(340px, calc(100% - 32px));
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
-}
-
-.promotion-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(4px);
-}
-
-.promotion-dialog h3 {
-  font-size: 18px;
-  font-weight: 800;
-  margin-bottom: 4px;
-}
-
-.promotion-dialog p {
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 16px;
-}
-
-.promotion-options {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.promo-piece {
-  font-family: 'Segoe UI Symbol', serif;
-  font-size: 32px;
-  aspect-ratio: 1;
-  background: var(--surface-2);
-  border: 1px solid var(--line-2);
+  line-height: 1.5;
   border-radius: 10px;
-  color: var(--cream);
-  cursor: pointer;
-  transition: all .15s;
+  overscroll-behavior: contain;
+}
+.chat-msg { padding: 5px 7px; border-radius: 7px; background: rgba(255,255,255,.025); }
+.chat-form { flex-shrink: 0; gap: 8px; }
+.chat-form .text-input { min-width: 0; flex: 1; height: 42px; }
+.chat-form .btn { min-height: 42px; padding: 0 15px; }
+.move-list { max-height: 130px; overflow-y: auto; }
+
+@media (max-width: 900px) {
+  .layout { padding: 12px 10px 22px; }
+  .game-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .side-panel { display: flex; }
+  .side-panel > .chat-panel,
+  .chat-panel { order: 0; height: 320px; min-height: 280px; }
+  .chat-messages { font-size: 13px; }
 }
 
-.promo-piece:hover {
-  background: var(--accent);
-  color: #1a1410;
-  border-color: var(--accent);
+@media (max-width: 480px) {
+  .layout { padding: 8px 6px 18px; }
+  .board-panel { padding: 5px; }
+  .side-panel > .chat-panel,
+  .chat-panel { height: 300px; min-height: 260px; padding: 9px; }
+  .chat-form .btn { padding: 0 10px; }
+}
+--- END FILE: public/style.css ---
+
+--- FILE: public/watch.html ---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess — Watching</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .watch-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: var(--danger);
+      background: rgba(224, 104, 79, 0.12);
+      padding: 4px 10px;
+      border-radius: 6px;
+      margin-bottom: 12px;
+    }
+    .watch-badge::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--danger);
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="brand"><span class="brand-mark">♞</span><span class="brand-name">CHESS</span></a>
+    <a href="/history.html" class="btn-ghost-sm">← Back to History</a>
+  </header>
+  <main class="layout">
+    <div class="watch-badge">🔴 WATCHING LIVE</div>
+    <div class="game-shell">
+      <div class="game-topline">
+        <div>
+          <span class="label">ROOM</span>
+          <div class="room-line"><strong id="roomCodeLabel">——</strong></div>
+        </div>
+        <span id="connStatus" class="btn-ghost-sm">Connecting...</span>
+      </div>
+      <div class="game-grid">
+        <section class="board-panel">
+          <div class="player-strip">
+            <div class="avatar">♟</div>
+            <div class="player-info">
+              <strong id="blackName">Black</strong>
+              <span id="blackTime">10:00</span>
+            </div>
+          </div>
+          <div class="board-frame">
+            <div id="board" class="board"></div>
+          </div>
+          <div class="player-strip self-strip">
+            <div class="avatar self-avatar">♞</div>
+            <div class="player-info">
+              <strong id="whiteName">White</strong>
+              <span id="whiteTime">10:00</span>
+            </div>
+          </div>
+          <div class="board-footer">
+            <span id="turnIndicator"><i class="turn-dot"></i> Waiting</span>
+          </div>
+        </section>
+        <aside class="side-panel">
+          <div class="panel">
+            <div class="panel-head">
+              <span class="label">MATCH STATUS</span>
+              <span id="statusBadge" class="status-badge">LIVE</span>
+            </div>
+            <h3 id="statusTitle">Game in progress</h3>
+            <p id="statusDescription">Watching in real time</p>
+          </div>
+          <div class="panel moves-panel">
+            <div class="panel-head">
+              <h3>Move history</h3>
+              <span id="moveCount">0 moves</span>
+            </div>
+            <div id="moveList" class="move-list">
+              <div class="empty-moves">No moves yet</div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </main>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/chess.min.js"></script>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const code = (params.get("code") || "").toUpperCase();
+    const $ = id => document.getElementById(id);
+    function cModal({ title, message, okText, cancelText, danger = false }) {
+      const isAr = document.cookie.split('; ').some(c => c === 'lang=ar');
+      const bg = document.createElement("div");
+      bg.className = "chess-modal-backdrop open";
+      bg.innerHTML = '<div class="chess-modal" dir="' + (isAr ? 'rtl' : 'ltr') + '"><h3>' + (title || (isAr ? 'تأكيد' : 'Confirm')) + '</h3><p>' + (message || '') + '</p><div class="chess-modal-actions">' + (cancelText !== null ? '<button class="chess-modal-btn" data-action="cancel">' + (cancelText || (isAr ? 'إلغاء' : 'Cancel')) + '</button>' : '') + '<button class="chess-modal-btn ' + (danger ? 'danger' : 'primary') + '" data-action="ok">' + (okText || (isAr ? 'موافق' : 'OK')) + '</button></div></div>';
+      document.body.appendChild(bg);
+      return new Promise(function(resolve) {
+        bg.addEventListener('click', function(e) {
+          var btn = e.target.closest('[data-action]');
+          if (btn) { bg.remove(); resolve(btn.dataset.action === 'ok'); }
+          else if (e.target === bg) { bg.remove(); resolve(false); }
+        });
+      });
+    }
+    const socket = io();
+    const PIECES = {
+    wk: "/pieces/cburnett/wK.svg",
+    wq: "/pieces/cburnett/wQ.svg",
+    wr: "/pieces/cburnett/wR.svg",
+    wb: "/pieces/cburnett/wB.svg",
+    wn: "/pieces/cburnett/wN.svg",
+    wp: "/pieces/cburnett/wP.svg",
+    bk: "/pieces/cburnett/bK.svg",
+    bq: "/pieces/cburnett/bQ.svg",
+    br: "/pieces/cburnett/bR.svg",
+    bb: "/pieces/cburnett/bB.svg",
+    bn: "/pieces/cburnett/bN.svg",
+    bp: "/pieces/cburnett/bP.svg",
+  };
+    let state = { game: null, color: "spectator" };
+
+    function renderBoard(game) {
+      const boardEl = $("board");
+      boardEl.innerHTML = "";
+      const fenRows = game.board();
+      const boardMap = {};
+      fenRows.forEach((row, ri) => row.forEach((p, fi) => {
+        if (p) boardMap["abcdefgh"[fi] + (8 - ri)] = p;
+      }));
+      for (let r = 0; r < 8; r++) {
+        for (let f = 0; f < 8; f++) {
+          const square = "abcdefgh"[f] + (8 - r);
+          const piece = boardMap[square];
+          const fileIndex = f;
+          const rank = 8 - r;
+          const light = (fileIndex + rank) % 2 === 0;
+          const cell = document.createElement("div");
+          cell.className = "square " + (light ? "light" : "dark");
+          if (piece) {
+            const span = document.createElement("span");
+            span.className = "piece " + (piece.color === "w" ? "white" : "black");
+            span.innerHTML = `<img src="${PIECES[piece.color + piece.type]}" alt="" style="width:100%;height:100%;object-fit:contain;pointer-events:none" />`;
+            cell.appendChild(span);
+          }
+          if ((typeof game.inCheck === "function" ? game.inCheck() : game.in_check && game.in_check()) && piece && piece.type === "k" && piece.color === game.turn()) {
+            cell.classList.add("checked-king");
+          }
+          boardEl.appendChild(cell);
+        }
+      }
+    }
+
+    function renderHistory(history) {
+      const list = $("moveList");
+      list.innerHTML = "";
+      if (!history.length) {
+        list.innerHTML = '<div class="empty-moves">No moves yet</div>';
+      } else {
+        for (let i = 0; i < history.length; i += 2) {
+          const pair = document.createElement("div");
+          pair.className = "move-pair";
+          pair.innerHTML =
+            `<span class="move-no">${Math.floor(i/2)+1}.</span>` +
+            `<span class="move-san${i===history.length-1?' latest':''}">${history[i].san}</span>` +
+            `<span class="move-san${i+1===history.length-1?' latest':''}">${history[i+1]?.san || ''}</span>`;
+          list.appendChild(pair);
+        }
+        list.scrollTop = list.scrollHeight;
+      }
+      $("moveCount").textContent = history.length + " moves";
+    }
+
+    function fmt(sec) {
+      if (typeof sec !== "number") return "10:00";
+      return Math.floor(sec/60) + ":" + String(sec%60).padStart(2,"0");
+    }
+
+    function render(s) {
+      if (!s) return;
+      $("roomCodeLabel").textContent = s.code;
+      $("whiteName").textContent = s.players.w?.name || "White";
+      $("blackName").textContent = s.players.b?.name || "Black";
+      $("whiteTime").textContent = fmt(s.timeLeft?.w);
+      $("blackTime").textContent = fmt(s.timeLeft?.b);
+      try { state.game = new Chess(s.fen); } catch(e) { return; }
+      renderBoard(state.game);
+      renderHistory(s.history);
+      const turnLabel = s.turn === "w" ? "White to move" : "Black to move";
+      $("turnIndicator").innerHTML = '<i class="turn-dot"></i> ' + turnLabel;
+      $("statusTitle").textContent = s.status === "playing" ? (s.turn === "w" ? "White to move" : "Black to move") : s.status;
+      $("statusDescription").textContent = "Watching in real time";
+    }
+
+    socket.on("connect", () => {
+      $("connStatus").textContent = "Connected";
+      if (code) socket.emit("spectate", { code });
+    });
+    socket.on("spectating", ({ code: c, state: s }) => render(s));
+    socket.on("state", s => { if (s && s.code === code) render(s); });
+    socket.on("clock", ({ timeLeft }) => {
+      $("whiteTime").textContent = fmt(timeLeft.w);
+      $("blackTime").textContent = fmt(timeLeft.b);
+    });
+    socket.on("gameError", msg => { $("connStatus").textContent = msg; });
+  </script>
+</body>
+</html>
+--- END FILE: public/watch.html ---
+
+--- FILE: server.js ---
+const express = require("express");
+const http = require("http");
+const path = require("path");
+const crypto = require("crypto");
+const { Server } = require("socket.io");
+const { Chess } = require("chess.js");
+require("dotenv").config({ path: ".env.local" });
+
+let db = null;
+try {
+  const { createClient } = require("@libsql/client");
+  const dbUrl = process.env.TURSO_DATABASE_URL || process.env.DATABASE_URL;
+  const dbToken = process.env.TURSO_AUTH_TOKEN || process.env.DATABASE_AUTH_TOKEN;
+
+  if (dbUrl) {
+    db = createClient({ url: dbUrl, authToken: dbToken });
+    console.log("✅ Turso DB client ready");
+
+    db.execute(`
+      CREATE TABLE IF NOT EXISTS chess_games (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL,
+        player_white TEXT NOT NULL,
+        player_black TEXT,
+        winner TEXT,
+        result TEXT,
+        moves TEXT,
+        duration_seconds INTEGER,
+        time_white INTEGER,
+        time_black INTEGER,
+        started_at TEXT,
+        ended_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `)
+      .then(() => console.log("✅ chess_games table ready"))
+      .catch(err => console.log("chess_games auto-create:", err.message));
+  } else {
+    console.log("⚠️ No TURSO_DATABASE_URL set — history disabled");
+  }
+} catch (e) {
+  console.log("⚠️ DB init failed:", e.message);
 }
 
-.cancel-promo { width: 100%; }
+const app = express();
+const server = http.createServer(app);
 
-/* ============ MOBILE ============ */
-@media (max-width: 760px) {
-  .topbar { height: 54px; padding: 0 14px; }
-  .brand-name { font-size: 12px; letter-spacing: 1.5px; }
-  .brand-mark { width: 28px; height: 28px; font-size: 18px; }
-  .top-status { font-size: 11px; }
+const io = new Server(server, {
+  cors: { origin: true, methods: ["GET", "POST"] },
+  pingInterval: 25000,
+  pingTimeout: 20000
+});
 
-  .layout { padding: 16px 12px 24px; }
+const PORT = process.env.PORT || 3000;
+const rooms = new Map();
+global.rooms = rooms;
 
-  .hero { margin-bottom: 20px; }
-  .hero h1 { font-size: 34px; }
-  .hero p { font-size: 13px; }
-  .eyebrow { font-size: 9px; padding: 4px 10px; margin-bottom: 12px; }
+app.use(express.static(path.join(__dirname, "public")));
 
-  .card { padding: 18px; }
+app.get("/health", (_req, res) => {
+  res.status(200).json({ ok: true, rooms: rooms.size });
+});
 
-  .game-topline { padding: 10px 14px; }
-  .room-line { font-size: 16px; }
-  .room-line strong { letter-spacing: 2px; }
+app.get("/api/games", async (req, res) => {
+  if (!db) return res.json({ games: [], note: "DB not configured" });
 
-  .game-grid { grid-template-columns: 1fr; gap: 10px; }
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
 
-  .board-panel { padding: 8px; }
+    const rows = await db.execute({
+      sql: "SELECT * FROM chess_games ORDER BY id DESC LIMIT ?",
+      args: [limit]
+    });
 
-  .player-strip { gap: 8px; padding: 4px 2px 8px; }
-  .self-strip { padding: 8px 2px 4px; }
-  .avatar { width: 28px; height: 28px; font-size: 17px; }
-  .player-info strong { font-size: 11px; }
-  .player-info span { font-size: 9px; }
-  .clock { font-size: 12px; padding: 4px 8px; }
+    res.json({ games: rows.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-  .piece { font-size: clamp(24px, 10vw, 40px); }
+app.get("/api/games/live", (_req, res) => {
+  try {
+    const active = [];
 
-  .side-panel {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    for (const room of rooms.values()) {
+      if (!room.players.w || !room.players.b) continue;
+      if (room.game.isGameOver()) continue;
+
+      active.push({
+        code: room.code,
+        white: room.players.w.name,
+        black: room.players.b.name,
+        turn: room.game.turn(),
+        moves: room.game.history().length,
+        timeWhite: room.timeLeft.w,
+        timeBlack: room.timeLeft.b,
+        lastMove:
+          room.game.history({ verbose: true }).slice(-1)[0]?.san || null
+      });
+    }
+
+    res.json({ live: active });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/games/:id", async (req, res) => {
+  if (!db) return res.status(503).json({ error: "DB not configured" });
+
+  try {
+    const id = Number(req.params.id);
+
+    if (Number.isNaN(id)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+
+    const result = await db.execute({
+      sql: "SELECT * FROM chess_games WHERE id = ?",
+      args: [id]
+    });
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Not found" });
+    }
+
+    res.json({ game: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/games/:id", async (req, res) => {
+  if (!db) return res.status(503).json({ error: "DB not configured" });
+
+  try {
+    const id = Number(req.params.id);
+
+    if (Number.isNaN(id)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+
+    const result = await db.execute({
+      sql: "DELETE FROM chess_games WHERE id = ?",
+      args: [id]
+    });
+
+    res.json({ ok: true, deleted: result.rowsAffected });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/games", async (_req, res) => {
+  if (!db) return res.status(503).json({ error: "DB not configured" });
+
+  try {
+    const result = await db.execute("DELETE FROM chess_games");
+    res.json({ ok: true, deleted: result.rowsAffected });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get(/.*/, (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+function cleanName(value) {
+  return String(value || "Player")
+    .trim()
+    .replace(/[<>]/g, "")
+    .slice(0, 24) || "Player";
+}
+
+function makeCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code;
+
+  do {
+    code = Array.from(
+      { length: 6 },
+      () => chars[crypto.randomInt(chars.length)]
+    ).join("");
+  } while (rooms.has(code));
+
+  return code;
+}
+
+function publicState(room) {
+  const game = room.game;
+
+  const history = game.history({ verbose: true }).map(move => ({
+    color: move.color,
+    from: move.from,
+    to: move.to,
+    san: move.san,
+    piece: move.piece,
+    captured: move.captured || null,
+    promotion: move.promotion || null
+  }));
+
+  return {
+    code: room.code,
+    fen: game.fen(),
+    pgn: game.pgn(),
+    turn: game.turn(),
+    history,
+
+    players: {
+      w: room.players.w
+        ? {
+            name: room.players.w.name,
+            connected: room.players.w.connected
+          }
+        : null,
+
+      b: room.players.b
+        ? {
+            name: room.players.b.name,
+            connected: room.players.b.connected
+          }
+        : null
+    },
+
+    status:
+      room.resigned || room.drawAgreed
+        ? room.drawAgreed
+          ? "draw"
+          : "resigned"
+        : game.isCheckmate()
+          ? "checkmate"
+          : game.isStalemate()
+            ? "stalemate"
+            : game.isThreefoldRepetition()
+              ? "threefold"
+              : game.isInsufficientMaterial()
+                ? "insufficient"
+                : game.isDraw()
+                  ? "draw"
+                  : game.isCheck()
+                    ? "check"
+                    : "playing",
+
+    winner: room.resigned
+      ? room.resigned === "w"
+        ? "b"
+        : "w"
+      : game.isCheckmate()
+        ? game.turn() === "w"
+          ? "b"
+          : "w"
+        : null,
+
+    drawOffer: room.drawOffer,
+    rematch: room.rematch,
+    timeLeft: room.timeLeft,
+
+    running:
+      !!(
+        room.players.w?.connected &&
+        room.players.b?.connected
+      ) && !room.game.isGameOver()
+  };
+}
+
+function emitState(room) {
+  io.to(room.code).emit("state", publicState(room));
+}
+
+function getPlayer(room, socket) {
+  if (!room) return null;
+
+  for (const color of ["w", "b"]) {
+    const player = room.players[color];
+
+    if (player && player.socketId === socket.id) {
+      return color;
+    }
   }
 
-  .panel { padding: 12px; }
-  .status-panel { grid-column: 1 / -1; }
-  .moves-panel { grid-column: 1 / -1; }
-  .captured-panel { grid-column: 1; }
-  .action-row { grid-column: 2; align-self: start; }
-  .rematch-btn { grid-column: 1 / -1; }
-
-  .status-panel h3 { font-size: 14px; }
-  .invite-box strong { font-size: 17px; letter-spacing: 3px; }
-
-  .move-list { max-height: 140px; }
-  .move-pair { font-size: 10px; padding: 4px 6px; }
-
-  .captured-pieces { font-size: 16px; }
+  return null;
 }
 
-@media (max-width: 380px) {
-  .layout { padding: 12px 8px 20px; }
-  .hero h1 { font-size: 28px; }
-  .card { padding: 16px; }
-  .join-row { flex-direction: column; }
-  .join-row .btn { width: 100%; }
-  .piece { font-size: clamp(22px, 9.5vw, 36px); }
-  .side-panel { grid-template-columns: 1fr; }
-  .captured-panel, .action-row { grid-column: 1; }
+function joinSocket(socket, room, color, token) {
+  const player = room.players[color];
+
+  player.socketId = socket.id;
+  player.connected = true;
+  player.token = token || player.token || crypto.randomUUID();
+
+  socket.join(room.code);
+  socket.data.roomCode = room.code;
+  socket.data.playerToken = player.token;
+
+  socket.emit("joined", {
+    code: room.code,
+    color,
+    token: player.token,
+    state: publicState(room)
+  });
+
+  emitState(room);
 }
 
-/* Wide screens: give the board a bit more breathing room */
-@media (min-width: 1000px) {
-  .board-panel { padding: 16px; }
-  .board-frame { border-width: 4px; }
-  .side-panel { position: sticky; top: 76px; }
+function sendError(socket, message) {
+  socket.emit("gameError", message);
 }
 
-/* Ensure clock is always visible */
-.clock {
-  min-width: 70px;
-  text-align: center;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-weight: 700;
-  font-size: 14px;
-  letter-spacing: 0.5px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  background: var(--surface-2, #26221d);
-  color: var(--ink-soft, #b8afa0);
-  border: 1px solid var(--line, #302b24);
-}
-.clock.active-clock {
-  background: var(--accent, #c9a15f);
-  color: #1a1410;
-  border-color: var(--accent, #c9a15f);
-}
+async function saveGameRecord(room) {
+  if (!db || room.saved) return;
 
-/* Restore olive/green board colors (nicer than the cream/brown) */
-.square.light { background: #eeeed2 !important; }
-.square.dark  { background: #769656 !important; }
-.square.selected { box-shadow: inset 0 0 0 4px #f6f669 !important; }
-.square.last-move { background-image: linear-gradient(#f6f66980, #f6f66980) !important; }
-.square .dot { background: #202d1e70 !important; }
-.square .capture-ring { border-color: #202d1e80 !important; }
+  room.saved = true;
 
-/* Piece shadows on the green board */
-.piece.white {
-  color: #fffdf4;
-  text-shadow: 0 1px 1px #35352b, 1px 0 #35352b, -1px 0 #35352b, 0 -1px #35352b;
-}
-.piece.black {
-  color: #252821;
-  text-shadow: 0 1px 0 #f5f2df;
-}
---- END FILE: public/styles.css ---
+  try {
+    const startedAt = room.createdAt
+      ? new Date(room.createdAt).toISOString()
+      : null;
 
---- FILE: package.json ---
-{
-  "name": "chess-online-render",
-  "version": "1.0.0",
-  "description": "Real-time two-player chess with Node.js, Express, Socket.IO and chess.js",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
-  },
-  "engines": {
-    "node": ">=20"
-  },
-  "dependencies": {
-    "@libsql/client": "^0.18.0",
-    "chess.js": "^1.4.0",
-    "dotenv": "^18.0.9",
-    "express": "^5.1.0",
-    "socket.io": "^4.8.1"
+    const history = room.game.history({ verbose: true })
+      .map(move => move.san)
+      .join(" ");
+
+    const duration = room.createdAt
+      ? Math.floor((Date.now() - room.createdAt) / 1000)
+      : 0;
+
+    let result = "unknown";
+    let winner = null;
+
+    if (room.drawAgreed) {
+      result = "draw";
+    } else if (room.resigned) {
+      result = "resigned";
+      winner = room.resigned === "w" ? "black" : "white";
+    } else if (room.game.isCheckmate()) {
+      result = "checkmate";
+      winner = room.game.turn() === "w" ? "black" : "white";
+    } else if (room.game.isDraw()) {
+      result = "draw";
+    }
+
+    await db.execute({
+      sql: `INSERT INTO chess_games
+        (code, player_white, player_black, winner, result, moves,
+         move_times, duration_seconds, time_white, time_black, started_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        room.code,
+        room.players.w?.name || "White",
+        room.players.b?.name || "Black",
+        winner,
+        result,
+        history,
+        JSON.stringify(room.moveTimes || []),
+        duration,
+        room.timeLeft?.w ?? 0,
+        room.timeLeft?.b ?? 0,
+        startedAt
+      ]
+    });
+
+    console.log("Game saved:", room.code, result);
+  } catch (err) {
+    console.error("Failed to save game:", err.message);
   }
 }
---- END FILE: package.json ---
 
---- FILE: next.config.ts ---
-Not found
---- END FILE: next.config.ts ---
+io.on("connection", socket => {
+
+  socket.on("createRoom", ({ name, token } = {}) => {
+    const code = makeCode();
+
+    const room = {
+      code,
+      game: new Chess(),
+      drawOffer: null,
+      rematch: { w: false, b: false },
+      players: { w: null, b: null },
+      createdAt: Date.now(),
+      timeLeft: { w: 600, b: 600 },
+      moveTimes: [],
+      lastTick: Date.now()
+    };
+
+    room.players.w = {
+      name: cleanName(name),
+      token: token || crypto.randomUUID(),
+      socketId: socket.id,
+      connected: true
+    };
+
+    rooms.set(code, room);
+    joinSocket(socket, room, "w", token);
+  });
+
+  socket.on("joinRoom", ({ code, name, token } = {}) => {
+    code = String(code || "").trim().toUpperCase();
+
+    const room = rooms.get(code);
+
+    if (!room) {
+      return sendError(
+        socket,
+        "Room not found. Check the code or create a new room."
+      );
+    }
+
+    let existingColor = null;
+
+    for (const color of ["w", "b"]) {
+      if (
+        room.players[color] &&
+        token &&
+        room.players[color].token === token
+      ) {
+        existingColor = color;
+      }
+    }
+
+    if (existingColor) {
+      return joinSocket(socket, room, existingColor, token);
+    }
+
+    if (!room.players.w) {
+      return joinSocket(socket, room, "w", token);
+    }
+
+    if (!room.players.b) {
+      room.players.b = {
+        name: cleanName(name),
+        token: token || crypto.randomUUID(),
+        socketId: null,
+        connected: false
+      };
+
+      return joinSocket(socket, room, "b", token);
+    }
+
+    return sendError(socket, "This room already has two players.");
+  });
+
+  socket.on("reconnectRoom", ({ code, token } = {}) => {
+    code = String(code || "").trim().toUpperCase();
+
+    const room = rooms.get(code);
+
+    if (!room || !token) {
+      return sendError(
+        socket,
+        "That game session is no longer available. Create a new room."
+      );
+    }
+
+    for (const color of ["w", "b"]) {
+      if (room.players[color] && room.players[color].token === token) {
+        return joinSocket(socket, room, color, token);
+      }
+    }
+
+    sendError(socket, "This player session was not found in that room.");
+  });
+
+  socket.on("spectate", ({ code } = {}) => {
+    code = String(code || "").trim().toUpperCase();
+
+    const room = rooms.get(code);
+
+    if (!room) return sendError(socket, "Room not found.");
+
+    socket.join(room.code);
+    socket.data.roomCode = room.code;
+    socket.data.isSpectator = true;
+
+    socket.emit("spectating", {
+      code,
+      state: publicState(room)
+    });
+  });
+
+  socket.on("move", ({ from, to, promotion } = {}) => {
+    const room = rooms.get(socket.data.roomCode);
+    const color = getPlayer(room, socket);
+
+    if (!room || !color) {
+      return sendError(socket, "Join a room before moving.");
+    }
+
+    if (!room.players.w || !room.players.b) {
+      return sendError(socket, "Waiting for an opponent to join.");
+    }
+
+    if (room.game.isGameOver()) {
+      return sendError(socket, "This game has ended.");
+    }
+
+    if (room.game.turn() !== color) {
+      return sendError(socket, "It is not your turn.");
+    }
+
+    try {
+      const move = room.game.move({
+        from,
+        to,
+        promotion: promotion || "q"
+      });
+
+      room.moveTimes.push(Date.now() - room.createdAt);
+      room.drawOffer = null;
+      room.rematch = { w: false, b: false };
+
+      io.to(room.code).emit("lastMove", {
+        from: move.from,
+        to: move.to,
+        san: move.san
+      });
+
+      emitState(room);
+
+      if (room.game.isGameOver()) {
+        saveGameRecord(room);
+      }
+    } catch (_err) {
+      sendError(socket, "Illegal move. Choose a legal destination.");
+    }
+  });
+
+  socket.on("offerDraw", () => {
+    const room = rooms.get(socket.data.roomCode);
+    const color = getPlayer(room, socket);
+
+    if (!room || !color || room.game.isGameOver()) return;
+
+    if (room.drawOffer && room.drawOffer !== color) {
+      room.drawOffer = null;
+      room.drawAgreed = true;
+      room.game.header("Result", "1/2-1/2");
+
+      emitState(room);
+      io.to(room.code).emit("notice", "Draw agreed.");
+
+      saveGameRecord(room);
+    } else {
+      room.drawOffer = color;
+
+      emitState(room);
+
+      io.to(room.code).emit(
+        "notice",
+        `${color === "w" ? "White" : "Black"} offered a draw.`
+      );
+    }
+  });
+
+  socket.on("resign", () => {
+    const room = rooms.get(socket.data.roomCode);
+    const color = getPlayer(room, socket);
+
+    if (!room || !color || room.game.isGameOver()) return;
+
+    room.resigned = color;
+
+    room.game.header("Result", color === "w" ? "0-1" : "1-0");
+
+    emitState(room);
+
+    io.to(room.code).emit(
+      "notice",
+      `${color === "w" ? "White" : "Black"} resigned.`
+    );
+
+    saveGameRecord(room);
+  });
+
+  socket.on("rematch", () => {
+    const room = rooms.get(socket.data.roomCode);
+    const color = getPlayer(room, socket);
+
+    if (!room || !color) return;
+
+    room.rematch[color] = true;
+
+    if (room.rematch.w && room.rematch.b) {
+      room.game = new Chess();
+      room.drawOffer = null;
+      room.rematch = { w: false, b: false };
+      room.resigned = null;
+      room.drawAgreed = false;
+      room.timeLeft = { w: 600, b: 600 };
+      room.moveTimes = [];
+      room.lastTick = Date.now();
+      room.createdAt = Date.now();
+      room.saved = false;
+
+      emitState(room);
+      io.to(room.code).emit("notice", "New game started.");
+    } else {
+      emitState(room);
+
+      io.to(room.code).emit(
+        "notice",
+        "Rematch requested. Waiting for the other player."
+      );
+    }
+  });
+
+  // CHAT: Only one handler broadcasts each message.
+  socket.on("chatMessage", ({ code, message } = {}) => {
+    if (!code || typeof message !== "string") return;
+
+    code = String(code).trim().toUpperCase();
+
+    const cleanMsg = message.trim().slice(0, 256);
+
+    if (!cleanMsg) return;
+
+    const room = rooms.get(code);
+
+    if (!room) return;
+
+    let senderName = "Player";
+
+    if (room.players.w && room.players.w.socketId === socket.id) {
+      senderName = room.players.w.name;
+    } else if (room.players.b && room.players.b.socketId === socket.id) {
+      senderName = room.players.b.name;
+    } else if (socket.data.roomCode === code) {
+      senderName = "Spectator/Player";
+    } else {
+      return;
+    }
+
+    io.to(code).emit("chatMessage", {
+      name: senderName,
+      message: cleanMsg,
+      time: Date.now()
+    });
+  });
+
+  socket.on("disconnect", () => {
+    const room = rooms.get(socket.data.roomCode);
+    const color = getPlayer(room, socket);
+
+    if (room && color && room.players[color]) {
+      room.players[color].connected = false;
+      room.players[color].socketId = null;
+
+      emitState(room);
+    }
+  });
+});
+
+// Remove abandoned rooms after six hours.
+setInterval(() => {
+  const cutoff = Date.now() - 6 * 60 * 60 * 1000;
+
+  for (const [code, room] of rooms) {
+    const occupied = ["w", "b"].some(
+      color => room.players[color] && room.players[color].connected
+    );
+
+    if (!occupied && room.createdAt < cutoff) {
+      rooms.delete(code);
+    }
+  }
+}, 30 * 60 * 1000).unref();
+
+// Chess clock.
+setInterval(() => {
+  const now = Date.now();
+
+  for (const room of rooms.values()) {
+    if (
+      !room.players.w ||
+      !room.players.b ||
+      !room.players.w.connected ||
+      !room.players.b.connected
+    ) {
+      room.lastTick = now;
+      continue;
+    }
+
+    if (room.game.isGameOver()) {
+      room.lastTick = now;
+      continue;
+    }
+
+    const dt = Math.max(
+      0,
+      Math.round((now - room.lastTick) / 1000)
+    );
+
+    if (dt <= 0) continue;
+
+    room.lastTick = now;
+
+    const turn = room.game.turn();
+
+    room.timeLeft[turn] = Math.max(
+      0,
+      room.timeLeft[turn] - dt
+    );
+
+    if (room.timeLeft[turn] === 0) {
+      room.resigned = turn;
+
+      room.game.header(
+        "Result",
+        turn === "w" ? "0-1" : "1-0"
+      );
+
+      emitState(room);
+
+      io.to(room.code).emit(
+        "notice",
+        (turn === "w" ? "White" : "Black") + " ran out of time."
+      );
+
+      saveGameRecord(room);
+    } else {
+      io.to(room.code).emit("clock", {
+        timeLeft: room.timeLeft,
+        turn
+      });
+    }
+  }
+}, 1000);
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Chess Online listening on ${PORT}`);
+});--- END FILE: server.js ---
+
+--- FILE: .env.local (keys only, values redacted) ---
+TURSO_DATABASE_URL=[REDACTED]
+TURSO_AUTH_TOKEN=[REDACTED]
+R2_ACCOUNT_ID=[REDACTED]
+R2_ACCESS_KEY_ID=[REDACTED]
+R2_SECRET_ACCESS_KEY=[REDACTED]
+R2_BUCKET_NAME=[REDACTED]
+R2_PUBLIC_URL=[REDACTED]
+NEXT_PUBLIC_R2_PUBLIC_URL=[REDACTED]
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=[REDACTED]
+VAPID_PRIVATE_KEY=[REDACTED]
+VAPID_SUBJECT=[REDACTED]
+ADMIN_USERNAME=[REDACTED]
+ADMIN_PASSWORD=[REDACTED]
+ADMIN_SESSION_SECRET=[REDACTED]
+--- END FILE: .env.local ---

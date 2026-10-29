@@ -1053,3 +1053,101 @@ body.embedded .top-status .live-dot {
 
 /* RTL support */
 .chess-modal[dir="rtl"] .chess-modal-actions { justify-content: flex-start; }
+
+/* ============ CHAT PANEL ============ */
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  height: 220px;
+}
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-msg {
+  word-break: break-word;
+  line-height: 1.4;
+}
+.chat-msg span.chat-user {
+  font-weight: 700;
+  color: var(--olive, var(--accent));
+  margin-right: 4px;
+}
+.chat-form {
+  display: flex;
+  gap: 6px;
+}
+.chat-form .text-input {
+  height: 36px;
+  font-size: 13px;
+  padding: 0 10px;
+}
+.chat-form .btn {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+/* ============ SPACIOUS GAME + CHAT LAYOUT ============ */
+.layout { max-width: 1420px; padding: 16px 18px 28px; }
+.game-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(350px, .78fr);
+  gap: 14px;
+  align-items: start;
+}
+.board-panel { padding: 10px; }
+.side-panel { gap: 8px; min-width: 0; }
+.panel { padding: 11px; }
+
+/* Chat is the primary side-panel feature */
+.side-panel > .chat-panel,
+.chat-panel {
+  order: -1;
+  height: clamp(340px, calc(100vh - 210px), 620px);
+  min-height: 340px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+.chat-messages {
+  min-height: 0;
+  padding: 12px;
+  gap: 9px;
+  font-size: 13px;
+  line-height: 1.5;
+  border-radius: 10px;
+  overscroll-behavior: contain;
+}
+.chat-msg { padding: 5px 7px; border-radius: 7px; background: rgba(255,255,255,.025); }
+.chat-form { flex-shrink: 0; gap: 8px; }
+.chat-form .text-input { min-width: 0; flex: 1; height: 42px; }
+.chat-form .btn { min-height: 42px; padding: 0 15px; }
+.move-list { max-height: 130px; overflow-y: auto; }
+
+@media (max-width: 900px) {
+  .layout { padding: 12px 10px 22px; }
+  .game-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .side-panel { display: flex; }
+  .side-panel > .chat-panel,
+  .chat-panel { order: 0; height: 320px; min-height: 280px; }
+  .chat-messages { font-size: 13px; }
+}
+
+@media (max-width: 480px) {
+  .layout { padding: 8px 6px 18px; }
+  .board-panel { padding: 5px; }
+  .side-panel > .chat-panel,
+  .chat-panel { height: 300px; min-height: 260px; padding: 9px; }
+  .chat-form .btn { padding: 0 10px; }
+}

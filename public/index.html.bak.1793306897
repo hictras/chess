@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chess Online</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <!-- Topbar -->
+  <header class="topbar">
+    <a href="#" class="brand">
+      <div class="brand-mark">♟</div>
+      <span class="brand-name">CHESS ONLINE</span>
+    </a>
+    <div style="display: flex; align-items: center;">
+      <a href="/history.html" class="btn-ghost-sm" style="margin-right:12px; color:var(--ink-soft, #8b949e); text-decoration:none; padding: 6px 12px; border: 1px solid var(--line, #30363d); border-radius: 6px; font-size: 13px;">📜 History</a>
+      <div class="top-status">
+        <span class="live-dot"></span>
+        <span id="connectionText">Connecting…</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <!-- LOBBY VIEW -->
+    <section id="lobby" class="lobby">
+      <div class="hero">
+        <span class="eyebrow">REAL-TIME MULTIPLAYER</span>
+        <h1>Play Chess <em>Online</em></h1>
+        <p>Create a private room or join your friend with a code to play instantly.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="label">START A MATCH</span>
+          <span class="icon">♔</span>
+        </div>
+
+        <label class="field-label" for="playerName">YOUR NAME</label>
+        <input type="text" id="playerName" class="text-input" placeholder="Enter your name" maxlength="24" autocomplete="off">
+
+        <button type="button" id="createBtn" class="btn btn-primary btn-create">
+          <span>Create New Room</span>
+          <span class="arrow">→</span>
+        </button>
+
+        <div class="divider">OR JOIN EXISTING</div>
+
+        <label class="field-label" for="roomCode">ROOM CODE</label>
+        <div class="join-row">
+          <input type="text" id="roomCode" class="text-input code-input" placeholder="6-CHAR" maxlength="6" autocomplete="off">
+          <button type="button" id="joinBtn" class="btn btn-secondary">Join</button>
+        </div>
+
+        <div id="lobbyError" class="error-text"></div>
+      </div>
+    </section>
+
+    <!-- GAME VIEW -->
+    <section id="game" class="game-shell hidden">
+      <div class="game-topline">
+        <div>
+          <span class="label">ROOM CODE</span>
+          <div class="room-line">
+            <strong id="roomCodeLabel">------</strong>
+            <button type="button" id="copyCodeBtn" class="copy-btn">Copy</button>
+          </div>
+        </div>
+        <button type="button" id="leaveBtn" class="btn btn-ghost-sm">Leave Game</button>
+      </div>
+
+      <div class="game-grid">
+        <!-- Board Section -->
+        <div class="board-panel">
+          <!-- Opponent Strip -->
+          <div class="player-strip">
+            <div class="avatar">♝</div>
+            <div class="player-info">
+              <strong id="opponentName">Waiting for opponent</strong>
+              <span id="opponentCaption">Share room code</span>
+            </div>
+            <div id="opponentClock" class="clock">10:00</div>
+          </div>
+
+          <!-- Board Frame -->
+          <div class="board-frame">
+            <div id="board" class="board"></div>
+          </div>
+
+          <!-- Self Strip -->
+          <div class="player-strip self-strip">
+            <div class="avatar self-avatar">♙</div>
+            <div class="player-info">
+              <strong id="selfName">You</strong>
+              <span id="selfCaption">Playing White</span>
+            </div>
+            <div id="selfClock" class="clock">10:00</div>
+          </div>
+
+          <div class="board-footer">
+            <span id="turnIndicator"><i class="turn-dot"></i> Waiting for opponent</span>
+            <button type="button" id="flipBtn" class="btn btn-ghost-sm">Flip Board</button>
+          </div>
+        </div>
+
+        <!-- Sidebar Section -->
+        <div class="side-panel">
+          <!-- Status Panel -->
+          <div class="panel status-panel">
+            <div class="panel-head">
+              <span class="label">STATUS</span>
+              <span id="statusBadge" class="status-badge">WAITING</span>
+            </div>
+            <h3 id="statusTitle">Waiting for a challenger</h3>
+            <p id="statusDescription">Send your room code to a friend. The game starts when they join.</p>
+
+            <div class="invite-box">
+              <span>INVITE CODE</span>
+              <div>
+                <strong id="inviteCode">------</strong>
+                <button type="button" id="copyInviteBtn" class="btn btn-ghost-sm">Copy</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Move History Panel -->
+          <div class="panel moves-panel">
+            <div class="panel-head">
+              <h3>Move History</h3>
+              <span id="moveCount">0 moves</span>
+            </div>
+            <div id="moveList" class="move-list">
+              <div class="empty-moves">Your opening move will appear here.</div>
+            </div>
+          </div>
+
+          <!-- Captured Pieces Panel -->
+          <div class="panel captured-panel">
+            <span class="label">CAPTURED PIECES</span>
+            <div class="captured-row">
+              <span>By You:</span>
+              <div id="capturedByYou" class="captured-pieces">—</div>
+            </div>
+            <div class="captured-row">
+              <span>By Opponent:</span>
+              <div id="capturedByOpponent" class="captured-pieces">—</div>
+            </div>
+          </div>
+
+          <!-- Chat Panel -->
+          <div class="panel chat-panel">
+            <div class="panel-head">
+              <span class="label">GAME CHAT</span>
+            </div>
+            <div id="chatMessages" class="chat-messages"></div>
+            <form id="chatForm" class="chat-form" action="javascript:void(0);">
+              <input type="text" id="chatInput" class="text-input" placeholder="Type a message..." autocomplete="off" maxlength="256">
+              <button type="submit" id="chatSendBtn" class="btn btn-primary">
+  Send
+</button>
+            </form>
+          </div>
+
+          <!-- Actions -->
+          <div class="action-row">
+            <button type="button" id="drawBtn" class="btn btn-secondary" disabled>Offer draw</button>
+            <button type="button" id="resignBtn" class="btn btn-danger" disabled>Resign</button>
+          </div>
+
+          <button type="button" id="rematchBtn" class="btn btn-primary rematch-btn hidden">↻ Request rematch</button>
+
+          <div id="gameNotice" class="game-notice"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Promotion Dialog -->
+  <dialog id="promotionDialog" class="promotion-dialog">
+    <h3>Promote Pawn</h3>
+    <p>Choose a piece to promote your pawn:</p>
+    <div class="promotion-options">
+      <button type="button" class="promo-piece" value="q">♛</button>
+      <button type="button" class="promo-piece" value="r">♜</button>
+      <button type="button" class="promo-piece" value="b">♝</button>
+      <button type="button" class="promo-piece" value="n">♞</button>
+    </div>
+    <button type="button" class="btn btn-secondary cancel-promo">Cancel</button>
+  </dialog>
+
+  <!-- Scripts -->
+  <script src="/chess.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

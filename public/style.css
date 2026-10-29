@@ -1096,3 +1096,77 @@ body.embedded .top-status .live-dot {
   padding: 0 12px;
   font-size: 12px;
 }
+
+
+
+
+
+
+
+
+/* ============ RESPONSIVE LAYOUT ============ */
+
+/* Desktop: Board left, Sidebar right */
+.game-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+  gap: 12px;
+  align-items: start;
+}
+.board-panel { padding: 8px; min-width: 0; }
+.side-panel { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+/* Chat is small and fixed height */
+.chat-panel { 
+  height: 140px; 
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+}
+.chat-messages { flex: 1; min-height: 0; overflow-y: auto; margin-bottom: 6px; padding: 6px 8px; font-size: 12px; }
+.chat-form .text-input { height: 30px; font-size: 12px; padding: 0 8px; }
+.chat-form .btn { min-height: 30px; padding: 0 12px; font-size: 12px; }
+
+/* Compact Panel Styles */
+.panel { padding: 10px 12px; }
+.panel-head { margin-bottom: 6px; }
+.player-strip { padding: 4px 2px 6px; gap: 8px; }
+.self-strip { padding: 6px 2px 4px; }
+.avatar { width: 26px; height: 26px; font-size: 15px; border-radius: 6px; }
+.player-info strong { font-size: 11px; }
+.player-info span { font-size: 9px; }
+.clock { font-size: 12px; padding: 3px 8px; min-width: 56px; }
+.status-panel h3 { font-size: 13px; }
+.status-panel > p { font-size: 10px; line-height: 1.45; }
+.move-list { max-height: 100px; }
+
+/* Put Action buttons in a single row below the panels */
+.action-row { display: flex; flex-direction: row; gap: 8px; }
+.action-row .btn { flex: 1; min-height: 34px; font-size: 11px; }
+.rematch-btn { min-height: 34px; font-size: 12px; }
+
+/* Mobile: Stack everything vertically and fix overflow */
+@media (max-width: 960px) {
+  .layout { padding: 12px 10px 22px; overflow-x: hidden; }
+  .game-grid { 
+    grid-template-columns: 1fr; 
+    width: 100%;
+    min-width: 0;
+  }
+  
+  /* Prevent the top header from overflowing */
+  .game-topline { 
+    flex-wrap: wrap; 
+    gap: 8px; 
+    padding: 10px; 
+    width: 100%; 
+    box-sizing: border-box;
+  }
+  .room-line { flex-wrap: wrap; }
+  
+  .board-panel { width: 100%; box-sizing: border-box; padding: 6px; }
+  .side-panel { display: flex; flex-direction: column; width: 100%; }
+  
+  /* Chat goes below board */
+  .chat-panel { height: 180px; min-height: 180px; }
+}
