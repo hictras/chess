@@ -1,0 +1,2437 @@
+=== PROJECT BACKUP ===
+Date: Thu Oct 29 16:02:04 MEST 2026
+
+
+--- FILE: public/app.js ---
+(() => {
+  const $ = id => document.getElementById(id);
+  const socket = io();
+
+  function cModal({ title, message, okText, cancelText, danger = false }) {
+    const isAr = document.cookie.split('; ').some(c => c === 'lang=ar');
+    const bg = document.createElement("div");
+    bg.className = "chess-modal-backdrop open";
+    bg.innerHTML = '<div class="chess-modal" dir="' + (isAr ? 'rtl' : 'ltr') + '">' +
+      '<h3>' + (title || (isAr ? 'تأكيد' : 'Confirm')) + '</h3>' +
+      '<p>' + (message || '') + '</p>' +
+      '<div class="chess-modal-actions">' +
+      '<button class="chess-modal-btn" data-action="cancel">' + (cancelText || (isAr ? 'إلغاء' : 'Cancel')) + '</button>' +
+      '<button class="chess-modal-btn ' + (danger ? 'danger' : 'primary') + '" data-action="ok">' + (okText || (isAr ? 'موافق' : 'OK')) + '</button>' +
+      '</div></div>';
+    document.body.appendChild(bg);
+    return new Promise(function(resolve) {
+      bg.addEventListener('click', function(e) {
+        var btn = e.target.closest('[data-action]');
+        if (btn) { bg.remove(); resolve(btn.dataset.action === 'ok'); }
+        else if (e.target === bg) { bg.remove(); resolve(false); }
+      });
+    });
+  }
+  const PIECES = {
+    wk: "/pieces/cburnett/wK.svg",
+    wq: "/pieces/cburnett/wQ.svg",
+    wr: "/pieces/cburnett/wR.svg",
+    wb: "/pieces/cburnett/wB.svg",
+    wn: "/pieces/cburnett/wN.svg",
+    wp: "/pieces/cburnett/wP.svg",
+    bk: "/pieces/cburnett/bK.svg",
+    bq: "/pieces/cburnett/bQ.svg",
+    br: "/pieces/cburnett/bR.svg",
+    bb: "/pieces/cburnett/bB.svg",
+    bn: "/pieces/cburnett/bN.svg",
+    bp: "/pieces/cburnett/bP.svg",
+  };
+  const state = {
+    code: null, color: null, token: sessionStorage.getItem("chessPlayerToken") || null,
+    game: null, flipped: false, selected: null, legalTargets: [], lastMove: null,
+    latestState: null, pendingPromotion: null, noticeTimer: null
+  };
+  const boardEl = $("board");
+  const promotionDialog = $("promotionDialog");
+
+  function showNotice(message, error = false) {
+    const el = $("gameNotice");
+    el.textContent = message || "";
+    el.classList.toggle("error-toast", error);
+    clearTimeout(state.noticeTimer);
+    if (message) state.noticeTimer = setTimeout(() => { if (el.textContent === message) el.textContent = ""; }, 5000);
+  }
+  function lobbyError(message) { $("lobbyError").textContent = message || ""; }
+  function displayGame() {
+    $("lobby").classList.add("hidden");
+    $("game").classList.remove("hidden");
+    $("roomCodeLabel").textContent = state.code;
+    $("inviteCode").textContent = state.code;
+  }
+  function showLobby() {
+    $("game").classList.add("hidden");
+    $("lobby").classList.remove("hidden");
+    state.code = null; state.color = null; state.game = null;
+    state.selected = null; state.legalTargets = []; state.latestState = null;
+  }
+  function copyCode() {
+    if (!state.code) return;
+    const text = state.code;
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(() => showNotice("Room code copied.")).catch(() => fallbackCopy(text));
+    } else fallbackCopy(text);
+  }
+  function fallbackCopy(text) {
+    const el = document.createElement("textarea");
+    el.value = text; document.body.appendChild(el); el.select();
+    try { document.execCommand("copy"); showNotice("Room code copied."); }
+    catch (_) { showNotice("Your room code is " + text); }
+    el.remove();
+  }
+  function safeName() { return $("playerName").value.trim().slice(0, 24) || "Player"; }
+  function persistSession() {
+    if (state.code && state.token) {
+      sessionStorage.setItem("chessRoomCode", state.code);
+      sessionStorage.setItem("chessPlayerToken", state.token);
+    }
+  }
+  function createRoom() {
+    if (!socket.connected) return lobbyError("Connecting to the game server. Please try again in a moment.");
+    lobbyError("");
+    state.token = sessionStorage.getItem("chessPlayerToken") || null;
+    socket.emit("createRoom", { name: safeName(), token: state.token });
+  }
+  function joinRoom() {
+    if (!socket.connected) return lobbyError("Connecting to the game server. Please try again in a moment.");
+    const code = $("roomCode").value.trim().toUpperCase();
+    if (!/^[A-Z0-9]{6}$/.test(code)) return lobbyError("Enter the 6-character room code.");
+    lobbyError("");
+    socket.emit("joinRoom", { code, name: safeName(), token: sessionStorage.getItem("chessPlayerToken") || null });
+  }
+  function getLegalTargets(square) {
+    if (!state.game) return [];
+    return state.game.moves({ square, verbose: true }).map(m => m.to);
+  }
+  function pieceAt(square) {
+    const piece = state.game && state.game.get(square);
+    return piece ? PIECES[piece.color + piece.type] : "";
+  }
+  function findCheckedKingSquare(game) {
+    try {
+      if (!game) return null;
+    var inChk = (typeof game.inCheck === "function") ? game.inCheck() : (game.in_check ? game.in_check() : false);
+    if (!inChk) return null;
+      const turn = game.turn();
+      const board = game.board();
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          const sq = board[r][c];
+          if (sq && sq.type === "k" && sq.color === turn) {
+            return "abcdefgh"[c] + (8 - r);
+          }
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function renderBoard() {
+    if (!state.game) return;
+    const checkedKingSquare = findCheckedKingSquare(state.game);
+    boardEl.innerHTML = "";
+    const files = state.flipped ? "hgfedcba" : "abcdefgh";
+    const ranks = state.flipped ? "12345678" : "87654321";
+    const fenRows = state.game.board();
+    const boardMap = {};
+    fenRows.forEach((row, ri) => row.forEach((p, fi) => {
+      if (p) boardMap["abcdefgh"[fi] + (8 - ri)] = p;
+    }));
+    for (let r = 0; r < 8; r++) {
+      for (let f = 0; f < 8; f++) {
+        const square = files[f] + ranks[r];
+        const piece = boardMap[square];
+        const fileIndex = "abcdefgh".indexOf(square[0]);
+        const rank = Number(square[1]);
+        const light = (fileIndex + rank) % 2 === 0;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "square " + (light ? "light" : "dark");
+        btn.dataset.square = square;
+        btn.setAttribute("aria-label", square + (piece ? " " + piece.color + " " + piece.type : ""));
+        if (state.selected === square) btn.classList.add("selected");
+        if (state.lastMove && (state.lastMove.from === square || state.lastMove.to === square)) btn.classList.add("last-move");
+        if (square === checkedKingSquare) btn.classList.add("checked-king");
+        if (piece) {
+          const span = document.createElement("span");
+          span.className = "piece " + (piece.color === "w" ? "white" : "black");
+          span.innerHTML = `<img src="${PIECES[piece.color + piece.type]}" alt="" style="width:100%;height:100%;object-fit:contain;pointer-events:none" />`;
+          btn.appendChild(span);
+        }
+        if (state.legalTargets.includes(square)) {
+          const mark = document.createElement("span");
+          mark.className = piece ? "capture-ring" : "dot";
+          btn.appendChild(mark);
+        }
+        if (f === 0) {
+          const coord = document.createElement("span");
+          coord.className = "coord rank"; coord.textContent = square[1]; btn.appendChild(coord);
+        }
+        if (r === 7) {
+          const coord = document.createElement("span");
+          coord.className = "coord file"; coord.textContent = square[0]; btn.appendChild(coord);
+        }
+        btn.addEventListener("click", () => onSquareClick(square));
+        boardEl.appendChild(btn);
+      }
+    }
+  }
+  function onSquareClick(square) {
+    if (!state.game || !state.latestState || state.latestState.status === "checkmate" ||
+        ["stalemate", "threefold", "insufficient", "draw"].includes(state.latestState.status)) return;
+    if (state.latestState.turn !== state.color) return showNotice("It is not your turn.", true);
+    const piece = state.game.get(square);
+    if (state.selected && state.legalTargets.includes(square)) {
+      const moves = state.game.moves({ square: state.selected, verbose: true }).filter(m => m.to === square);
+      const promotionMoves = moves.filter(m => m.promotion);
+      if (promotionMoves.length) {
+        state.pendingPromotion = { from: state.selected, to: square };
+        promotionDialog.showModal();
+      } else {
+        socket.emit("move", { from: state.selected, to: square });
+        state.selected = null; state.legalTargets = []; renderBoard();
+      }
+      return;
+    }
+    if (piece && piece.color === state.color) {
+      state.selected = square;
+      state.legalTargets = getLegalTargets(square);
+      renderBoard();
+    } else {
+      state.selected = null; state.legalTargets = []; renderBoard();
+    }
+  }
+  function renderHistory(history) {
+    const list = $("moveList");
+    list.innerHTML = "";
+    if (!history.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-moves"; empty.textContent = "Your opening move will appear here.";
+      list.appendChild(empty);
+    } else {
+      for (let i = 0; i < history.length; i += 2) {
+        const pair = document.createElement("div");
+        pair.className = "move-pair";
+        const no = document.createElement("span"); no.className = "move-no"; no.textContent = (Math.floor(i / 2) + 1) + ".";
+        const white = document.createElement("span"); white.className = "move-san"; white.textContent = history[i].san;
+        const black = document.createElement("span"); black.className = "move-san";
+        if (history[i + 1]) black.textContent = history[i + 1].san;
+        if (i + (history[i + 1] ? 1 : 0) === history.length - 1) (history[i + 1] || history[i]).san && (history[i + 1] ? black : white).classList.add("latest");
+        pair.append(no, white, black); list.appendChild(pair);
+      }
+      list.scrollTop = list.scrollHeight;
+    }
+    $("moveCount").textContent = history.length + (history.length === 1 ? " move" : " moves");
+  }
+  const glyphOrder = {p:1,n:3,b:3,r:5,q:9,k:0};
+  function capturedPieces(history, capturedColor) {
+    const captured = history.filter(m => m.captured && m.color === (capturedColor === "w" ? "b" : "w"));
+    return captured.map(m => PIECES[capturedColor + m.captured]).join(" ") || "—";
+  }
+  function renderState(s) {
+    state.latestState = s;
+    try { state.game = new Chess(s.fen); } catch (_) { return showNotice("Could not read the latest board position.", true); }
+    if (state.selected && !state.game.get(state.selected)) { state.selected = null; state.legalTargets = []; }
+    const other = state.color === "w" ? "b" : "w";
+    const me = s.players[state.color];
+    const opponent = s.players[other];
+    $("selfName").textContent = me ? me.name + " (You)" : "You";
+    $("selfCaption").textContent = state.color === "w" ? "Playing White" : "Playing Black";
+    $("opponentName").textContent = opponent ? opponent.name : "Waiting for opponent";
+    $("opponentCaption").textContent = opponent ? (opponent.connected ? "Connected" : "Reconnecting…") : "Share the room code to invite them";
+    const isMyTurn = s.turn === state.color && s.status === "playing";
+    const isTheirTurn = s.turn === other && s.status === "playing";
+    const fmt = (sec) => {
+      if (typeof sec !== "number") return "10:00";
+      const m = Math.floor(sec / 60);
+      const r = sec % 60;
+      return m + ":" + String(r).padStart(2, "0");
+    };
+    $("selfClock").textContent = fmt(s.timeLeft ? s.timeLeft[state.color] : 600);
+    $("opponentClock").textContent = fmt(s.timeLeft ? s.timeLeft[other] : 600);
+    $("selfClock").classList.toggle("active-clock", isMyTurn);
+    $("opponentClock").classList.toggle("active-clock", isTheirTurn);
+    $("turnIndicator").innerHTML = '<i class="turn-dot"></i> ' + statusLine(s);
+    const badge = $("statusBadge");
+    badge.textContent = badgeText(s);
+    $("statusTitle").textContent = titleText(s);
+    $("statusDescription").textContent = descriptionText(s);
+    $("drawBtn").disabled = !opponent || s.status !== "playing";
+    $("resignBtn").disabled = !opponent || s.status !== "playing";
+    $("rematchBtn").classList.toggle("hidden", !["checkmate", "stalemate", "threefold", "insufficient", "draw"].includes(s.status));
+    $("rematchBtn").textContent = s.rematch && s.rematch[state.color] ? "✓ Rematch requested" : "↻ Request rematch";
+    $("capturedByYou").textContent = capturedPieces(s.history, state.color);
+    $("capturedByOpponent").textContent = capturedPieces(s.history, other);
+    renderHistory(s.history);
+    renderBoard();
+  }
+  function statusLine(s) {
+    if (!s.players.b) return "Waiting for opponent";
+    if (!s.players.w?.connected || !s.players.b?.connected) return "Player reconnecting";
+    if (s.status === "checkmate") return "Checkmate";
+    if (["stalemate", "threefold", "insufficient", "draw", "resigned"].includes(s.status)) return "Game drawn";
+    if (s.status === "check") return (s.turn === state.color ? "Your king is in check" : "Opponent is in check");
+    return s.turn === state.color ? "Your turn to move" : "Opponent's turn";
+  }
+  function badgeText(s) {
+    if (!s.players.b) return "WAITING";
+    if (s.status === "checkmate" || s.status === "resigned") return "GAME OVER";
+    if (["stalemate", "threefold", "insufficient", "draw", "resigned"].includes(s.status)) return "DRAW";
+    if (s.status === "check") return "CHECK";
+    return "IN PROGRESS";
+  }
+  function titleText(s) {
+    if (!s.players.b) return "Waiting for a challenger";
+    if (s.status === "resigned") return s.winner === state.color ? "Victory by resignation!" : "You resigned";
+    if (s.status === "checkmate") return (s.winner === state.color ? "Victory!" : "Game over") ;
+    if (s.status === "stalemate") return "Draw by stalemate";
+    if (s.status === "threefold") return "Draw by repetition";
+    if (s.status === "insufficient") return "Draw — insufficient material";
+    if (s.status === "draw") return "Game drawn";
+    if (s.status === "check") return "King in check";
+    return s.turn === state.color ? "Your move" : "Opponent is thinking";
+  }
+  function descriptionText(s) {
+    if (!s.players.b) return "Send your room code to a friend. The game starts when they join.";
+    if (s.status === "checkmate") return (s.winner === state.color ? "You won this game. Well played." : "Your opponent has won this game.") + " Request a rematch to play again.";
+    if (["stalemate", "threefold", "insufficient", "draw", "resigned"].includes(s.status)) return "The game ended in a draw. You can request a rematch.";
+    if (s.drawOffer && s.drawOffer !== state.color) return "Your opponent offered a draw. Press Offer draw to accept.";
+    if (s.drawOffer === state.color) return "Draw offered. Waiting for your opponent.";
+    if (!s.players[state.color]?.connected || !s.players[state.color === "w" ? "b" : "w"]?.connected) return "A player has disconnected. The same room can be rejoined using the saved browser session.";
+    return s.turn === state.color ? "Take your time and find the strongest move." : "Waiting for your opponent to make a move.";
+  }
+  function joinSuccess(data) {
+    state.code = data.code; state.color = data.color; state.token = data.token;
+    persistSession();
+    displayGame();
+    renderState(data.state);
+    showNotice("You are playing " + (state.color === "w" ? "White" : "Black") + ".");
+  }
+
+  $("createBtn").addEventListener("click", createRoom);
+  $("joinBtn").addEventListener("click", joinRoom);
+  $("roomCode").addEventListener("input", e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6); });
+  $("roomCode").addEventListener("keydown", e => { if (e.key === "Enter") joinRoom(); });
+  $("playerName").addEventListener("keydown", e => { if (e.key === "Enter") createRoom(); });
+  $("copyCodeBtn").addEventListener("click", copyCode);
+  $("copyInviteBtn").addEventListener("click", copyCode);
+  $("flipBtn").addEventListener("click", () => { state.flipped = !state.flipped; renderBoard(); });
+  $("leaveBtn").addEventListener("click", async () => {
+    const isAr = document.cookie.split('; ').some(c => c === 'lang=ar');
+    const ok = await cModal({
+      title: isAr ? 'مغادرة المباراة' : 'Leave Game',
+      message: isAr ? 'مغادرة هذه المباراة؟ يمكنك العودة بالرمز.' : 'Leave this match? You can rejoin with the room code while the room is available.',
+      okText: isAr ? 'مغادرة' : 'Leave',
+      danger: true
+    });
+    if (ok) {
+      sessionStorage.removeItem("chessRoomCode");
+      showLobby();
+    }
+  });
+  $("drawBtn").addEventListener("click", () => socket.emit("offerDraw"));
+  $("resignBtn").addEventListener("click", async () => {
+    const isAr = document.cookie.split('; ').some(c => c === 'lang=ar');
+    const ok = await cModal({
+      title: isAr ? 'الاستسلام' : 'Resign',
+      message: isAr ? 'هل تريد الاستسلام؟ ستفقد هذه المباراة.' : 'Are you sure you want to resign this game?',
+      okText: isAr ? 'استسلم' : 'Resign',
+      danger: true
+    });
+    if (ok) socket.emit("resign");
+  });
+  $("rematchBtn").addEventListener("click", () => socket.emit("rematch"));
+  promotionDialog.querySelectorAll(".promo-piece").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      const promotion = button.value;
+      const move = state.pendingPromotion;
+      promotionDialog.close();
+      state.pendingPromotion = null;
+      if (move) socket.emit("move", { from: move.from, to: move.to, promotion });
+      state.selected = null; state.legalTargets = []; renderBoard();
+    });
+  });
+  promotionDialog.querySelector(".cancel-promo").addEventListener("click", () => {
+    state.pendingPromotion = null; state.selected = null; state.legalTargets = []; renderBoard();
+  });
+  socket.on("connect", () => {
+    $("connectionText").textContent = "Connected";
+    document.querySelector(".live-dot").classList.add("connected");
+    const savedCode = sessionStorage.getItem("chessRoomCode");
+    const token = sessionStorage.getItem("chessPlayerToken");
+    if (savedCode && token && !state.code) socket.emit("reconnectRoom", { code: savedCode, token });
+  });
+  socket.on("disconnect", () => {
+    $("connectionText").textContent = "Reconnecting";
+    document.querySelector(".live-dot").classList.remove("connected");
+    if (!document.querySelector("#game").classList.contains("hidden")) showNotice("Connection lost. Reconnecting…", true);
+  });
+  socket.on("joined", joinSuccess);
+  socket.on("state", s => {
+    if (!state.code || s.code !== state.code) return;
+    renderState(s);
+  });
+
+  socket.on("clock", ({ timeLeft, turn }) => {
+    if (!state.code || !state.color) return;
+    const other = state.color === "w" ? "b" : "w";
+    const fmt = (sec) => {
+      if (typeof sec !== "number") return "10:00";
+      const m = Math.floor(sec / 60);
+      const r = sec % 60;
+      return m + ":" + String(r).padStart(2, "0");
+    };
+    $("selfClock").textContent = fmt(timeLeft[state.color]);
+    $("opponentClock").textContent = fmt(timeLeft[other]);
+    $("selfClock").classList.toggle("active-clock", turn === state.color);
+    $("opponentClock").classList.toggle("active-clock", turn === other);
+  });
+  socket.on("lastMove", move => { state.lastMove = move; state.selected = null; state.legalTargets = []; if (state.latestState) renderBoard(); });
+  socket.on("gameError", message => {
+    if ($("game").classList.contains("hidden")) lobbyError(message);
+    else showNotice(message, true);
+  });
+  socket.on("notice", message => showNotice(message));
+  const savedName = localStorage.getItem("chessPlayerName");
+  if (savedName) $("playerName").value = savedName;
+  $("playerName").addEventListener("change", () => localStorage.setItem("chessPlayerName", safeName()));
+  const savedCode = sessionStorage.getItem("chessRoomCode");
+  if (savedCode) $("roomCode").value = savedCode;
+})();--- END FILE: public/app.js ---
+
+--- FILE: public/chess.min.js ---
+var Chess=function(r){var u="b",s="w",l=-1,_="p",A="n",S="b",m="r",y="q",p="k",t="pnbrqkPNBRQK",e="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",g=["1-0","0-1","1/2-1/2","*"],C={b:[16,32,17,15],w:[-16,-32,-17,-15]},T={n:[-18,-33,-31,-14,18,33,31,14],b:[-17,-15,17,15],r:[-16,1,16,-1],q:[-17,-16,-15,1,17,16,15,-1],k:[-17,-16,-15,1,17,16,15,-1]},c=[20,0,0,0,0,0,0,24,0,0,0,0,0,0,20,0,0,20,0,0,0,0,0,24,0,0,0,0,0,20,0,0,0,0,20,0,0,0,0,24,0,0,0,0,20,0,0,0,0,0,0,20,0,0,0,24,0,0,0,20,0,0,0,0,0,0,0,0,20,0,0,24,0,0,20,0,0,0,0,0,0,0,0,0,0,20,2,24,2,20,0,0,0,0,0,0,0,0,0,0,0,2,53,56,53,2,0,0,0,0,0,0,24,24,24,24,24,24,56,0,56,24,24,24,24,24,24,0,0,0,0,0,0,2,53,56,53,2,0,0,0,0,0,0,0,0,0,0,0,20,2,24,2,20,0,0,0,0,0,0,0,0,0,0,20,0,0,24,0,0,20,0,0,0,0,0,0,0,0,20,0,0,0,24,0,0,0,20,0,0,0,0,0,0,20,0,0,0,0,24,0,0,0,0,20,0,0,0,0,20,0,0,0,0,0,24,0,0,0,0,0,20,0,0,20,0,0,0,0,0,0,24,0,0,0,0,0,0,20],v=[17,0,0,0,0,0,0,16,0,0,0,0,0,0,15,0,0,17,0,0,0,0,0,16,0,0,0,0,0,15,0,0,0,0,17,0,0,0,0,16,0,0,0,0,15,0,0,0,0,0,0,17,0,0,0,16,0,0,0,15,0,0,0,0,0,0,0,0,17,0,0,16,0,0,15,0,0,0,0,0,0,0,0,0,0,17,0,16,0,15,0,0,0,0,0,0,0,0,0,0,0,0,17,16,15,0,0,0,0,0,0,0,1,1,1,1,1,1,1,0,-1,-1,-1,-1,-1,-1,-1,0,0,0,0,0,0,0,-15,-16,-17,0,0,0,0,0,0,0,0,0,0,0,0,-15,0,-16,0,-17,0,0,0,0,0,0,0,0,0,0,-15,0,0,-16,0,0,-17,0,0,0,0,0,0,0,0,-15,0,0,0,-16,0,0,0,-17,0,0,0,0,0,0,-15,0,0,0,0,-16,0,0,0,0,-17,0,0,0,0,-15,0,0,0,0,0,-16,0,0,0,0,0,-17,0,0,-15,0,0,0,0,0,0,-16,0,0,0,0,0,0,-17],h={p:0,n:1,b:2,r:3,q:4,k:5},o={NORMAL:"n",CAPTURE:"c",BIG_PAWN:"b",EP_CAPTURE:"e",PROMOTION:"p",KSIDE_CASTLE:"k",QSIDE_CASTLE:"q"},I={NORMAL:1,CAPTURE:2,BIG_PAWN:4,EP_CAPTURE:8,PROMOTION:16,KSIDE_CASTLE:32,QSIDE_CASTLE:64},P=7,w=6,L=1,R=0,N={a8:0,b8:1,c8:2,d8:3,e8:4,f8:5,g8:6,h8:7,a7:16,b7:17,c7:18,d7:19,e7:20,f7:21,g7:22,h7:23,a6:32,b6:33,c6:34,d6:35,e6:36,f6:37,g6:38,h6:39,a5:48,b5:49,c5:50,d5:51,e5:52,f5:53,g5:54,h5:55,a4:64,b4:65,c4:66,d4:67,e4:68,f4:69,g4:70,h4:71,a3:80,b3:81,c3:82,d3:83,e3:84,f3:85,g3:86,h3:87,a2:96,b2:97,c2:98,d2:99,e2:100,f2:101,g2:102,h2:103,a1:112,b1:113,c1:114,d1:115,e1:116,f1:117,g1:118,h1:119},E={w:[{square:N.a1,flag:I.QSIDE_CASTLE},{square:N.h1,flag:I.KSIDE_CASTLE}],b:[{square:N.a8,flag:I.QSIDE_CASTLE},{square:N.h8,flag:I.KSIDE_CASTLE}]},O=new Array(128),k={w:l,b:l},q=s,D={w:0,b:0},K=l,d=0,b=1,Q=[],U={};function x(r){void 0===r&&(r=!1),O=new Array(128),k={w:l,b:l},q=s,D={w:0,b:0},K=l,d=0,b=1,Q=[],r||(U={}),F(M())}function j(){B(e)}function B(r,e){void 0===e&&(e=!1);var n=r.split(/\s+/),t=n[0],o=0;if(!$(r).valid)return!1;x(e);for(var i=0;i<t.length;i++){var f=t.charAt(i);if("/"===f)o+=8;else if(-1!=="0123456789".indexOf(f))o+=parseInt(f,10);else{var a=f<"a"?s:u;W({type:f.toLowerCase(),color:a},fr(o)),o++}}return q=n[1],-1<n[2].indexOf("K")&&(D.w|=I.KSIDE_CASTLE),-1<n[2].indexOf("Q")&&(D.w|=I.QSIDE_CASTLE),-1<n[2].indexOf("k")&&(D.b|=I.KSIDE_CASTLE),-1<n[2].indexOf("q")&&(D.b|=I.QSIDE_CASTLE),K="-"===n[3]?l:N[n[3]],d=parseInt(n[4],10),b=parseInt(n[5],10),F(M()),!0}function $(r){var e="No errors.",n="FEN string must contain six space-delimited fields.",t="6th field (move number) must be a positive integer.",o="5th field (half move counter) must be a non-negative integer.",i="4th field (en-passant square) is invalid.",f="3rd field (castling availability) is invalid.",a="2nd field (side to move) is invalid.",l="1st field (piece positions) does not contain 8 '/'-delimited rows.",u="1st field (piece positions) is invalid [consecutive numbers].",s="1st field (piece positions) is invalid [invalid piece].",p="1st field (piece positions) is invalid [row too large].",c="Illegal en-passant square",v=r.split(/\s+/);if(6!==v.length)return{valid:!1,error_number:1,error:n};if(isNaN(v[5])||parseInt(v[5],10)<=0)return{valid:!1,error_number:2,error:t};if(isNaN(v[4])||parseInt(v[4],10)<0)return{valid:!1,error_number:3,error:o};if(!/^(-|[abcdefgh][36])$/.test(v[3]))return{valid:!1,error_number:4,error:i};if(!/^(KQ?k?q?|Qk?q?|kq?|q|-)$/.test(v[2]))return{valid:!1,error_number:5,error:f};if(!/^(w|b)$/.test(v[1]))return{valid:!1,error_number:6,error:a};var g=v[0].split("/");if(8!==g.length)return{valid:!1,error_number:7,error:l};for(var h=0;h<g.length;h++){for(var E=0,d=!1,b=0;b<g[h].length;b++)if(isNaN(g[h][b])){if(!/^[prnbqkPRNBQK]$/.test(g[h][b]))return{valid:!1,error_number:9,error:s};E+=1,d=!1}else{if(d)return{valid:!1,error_number:8,error:u};E+=parseInt(g[h][b],10),d=!0}if(8!==E)return{valid:!1,error_number:10,error:p}}return"3"==v[3][1]&&"w"==v[1]||"6"==v[3][1]&&"b"==v[1]?{valid:!1,error_number:11,error:c}:{valid:!0,error_number:0,error:e}}function M(){for(var r=0,e="",n=N.a8;n<=N.h1;n++){if(null==O[n])r++;else{0<r&&(e+=r,r=0);var t=O[n].color,o=O[n].type;e+=t===s?o.toUpperCase():o.toLowerCase()}n+1&136&&(0<r&&(e+=r),n!==N.h1&&(e+="/"),r=0,n+=8)}var i="";D[s]&I.KSIDE_CASTLE&&(i+="K"),D[s]&I.QSIDE_CASTLE&&(i+="Q"),D[u]&I.KSIDE_CASTLE&&(i+="k"),D[u]&I.QSIDE_CASTLE&&(i+="q"),i=i||"-";var f=K===l?"-":fr(K);return[e,q,i,f,d,b].join(" ")}function G(r){for(var e=0;e<r.length;e+=2)"string"==typeof r[e]&&"string"==typeof r[e+1]&&(U[r[e]]=r[e+1]);return U}function F(r){0<Q.length||(r!==e?(U.SetUp="1",U.FEN=r):(delete U.SetUp,delete U.FEN))}function i(r){var e=O[N[r]];return e?{type:e.type,color:e.color}:null}function W(r,e){if(!("type"in r&&"color"in r))return!1;if(-1===t.indexOf(r.type.toLowerCase()))return!1;if(!(e in N))return!1;var n=N[e];return(r.type!=p||k[r.color]==l||k[r.color]==n)&&(O[n]={type:r.type,color:r.color},r.type===p&&(k[r.color]=n),F(M()),!0)}function H(r,e,n,t,o){var i={color:q,from:e,to:n,flags:t,piece:r[e].type};return o&&(i.flags|=I.PROMOTION,i.promotion=o),r[n]?i.captured=r[n].type:t&I.EP_CAPTURE&&(i.captured=_),i}function Z(r){function e(r,e,n,t,o){if(r[n].type!==_||or(t)!==R&&or(t)!==P)e.push(H(r,n,t,o));else for(var i=[y,m,S,A],f=0,a=i.length;f<a;f++)e.push(H(r,n,t,o,i[f]))}var n=[],t=q,o=ar(t),i={b:L,w:w},f=N.a8,a=N.h1,l=!1,u=!(void 0!==r&&"legal"in r)||r.legal;if(void 0!==r&&"square"in r){if(!(r.square in N))return[];f=a=N[r.square],l=!0}for(var s=f;s<=a;s++)if(136&s)s+=7;else{var p=O[s];if(null!=p&&p.color===t)if(p.type===_){var c=s+C[t][0];if(null==O[c]){e(O,n,s,c,I.NORMAL);c=s+C[t][1];i[t]===or(s)&&null==O[c]&&e(O,n,s,c,I.BIG_PAWN)}for(v=2;v<4;v++){136&(c=s+C[t][v])||(null!=O[c]&&O[c].color===o?e(O,n,s,c,I.CAPTURE):c===K&&e(O,n,s,K,I.EP_CAPTURE))}}else for(var v=0,g=T[p.type].length;v<g;v++){var h=T[p.type][v];for(c=s;!(136&(c+=h));){if(null!=O[c]){if(O[c].color===t)break;e(O,n,s,c,I.CAPTURE);break}if(e(O,n,s,c,I.NORMAL),"n"===p.type||"k"===p.type)break}}}if(!l||a===k[t]){if(D[t]&I.KSIDE_CASTLE){var E=(d=k[t])+2;null!=O[d+1]||null!=O[E]||V(o,k[t])||V(o,d+1)||V(o,E)||e(O,n,k[t],E,I.KSIDE_CASTLE)}if(D[t]&I.QSIDE_CASTLE){var d;E=(d=k[t])-2;null!=O[d-1]||null!=O[d-2]||null!=O[d-3]||V(o,k[t])||V(o,d-1)||V(o,E)||e(O,n,k[t],E,I.QSIDE_CASTLE)}}if(!u)return n;var b=[];for(s=0,g=n.length;s<g;s++)er(n[s]),X(t)||b.push(n[s]),nr();return b}function z(r,e){var n="";if(r.flags&I.KSIDE_CASTLE)n="O-O";else if(r.flags&I.QSIDE_CASTLE)n="O-O-O";else{var t=function(r,e){for(var n=Z({legal:!e}),t=r.from,o=r.to,i=r.piece,f=0,a=0,l=0,u=0,s=n.length;u<s;u++){var p=n[u].from,c=n[u].to,v=n[u].piece;i===v&&t!==p&&o===c&&(f++,or(t)===or(p)&&a++,ir(t)===ir(p)&&l++)}if(0<f)return 0<a&&0<l?fr(t):0<l?fr(t).charAt(1):fr(t).charAt(0);return""}(r,e);r.piece!==_&&(n+=r.piece.toUpperCase()+t),r.flags&(I.CAPTURE|I.EP_CAPTURE)&&(r.piece===_&&(n+=fr(r.from)[0]),n+="x"),n+=fr(r.to),r.flags&I.PROMOTION&&(n+="="+r.promotion.toUpperCase())}return er(r),f()&&(a()?n+="#":n+="+"),nr(),n}function J(r){return r.replace(/=/,"").replace(/[+#]?[?!]*$/,"")}function V(r,e){for(var n=N.a8;n<=N.h1;n++)if(136&n)n+=7;else if(null!=O[n]&&O[n].color===r){var t=O[n],o=n-e,i=119+o;if(c[i]&1<<h[t.type]){if(t.type===_){if(0<o){if(t.color===s)return!0}else if(t.color===u)return!0;continue}if("n"===t.type||"k"===t.type)return!0;for(var f=v[i],a=n+f,l=!1;a!==e;){if(null!=O[a]){l=!0;break}a+=f}if(!l)return!0}}return!1}function X(r){return V(ar(r),k[r])}function f(){return X(q)}function a(){return f()&&0===Z().length}function n(){return!f()&&0===Z().length}function Y(){for(var r={},e=[],n=0,t=0,o=N.a8;o<=N.h1;o++)if(t=(t+1)%2,136&o)o+=7;else{var i=O[o];i&&(r[i.type]=i.type in r?r[i.type]+1:1,i.type===S&&e.push(t),n++)}if(2===n)return!0;if(3===n&&(1===r[S]||1===r[A]))return!0;if(n===r[S]+2){var f=0,a=e.length;for(o=0;o<a;o++)f+=e[o];if(0===f||f===a)return!0}return!1}function rr(){for(var r=[],e={},n=!1;;){var t=nr();if(!t)break;r.push(t)}for(;;){var o=M().split(" ").slice(0,4).join(" ");if(e[o]=o in e?e[o]+1:1,3<=e[o]&&(n=!0),!r.length)break;er(r.pop())}return n}function er(r){var e,n=q,t=ar(n);if(e=r,Q.push({move:e,kings:{b:k.b,w:k.w},turn:q,castling:{b:D.b,w:D.w},ep_square:K,half_moves:d,move_number:b}),O[r.to]=O[r.from],O[r.from]=null,r.flags&I.EP_CAPTURE&&(q===u?O[r.to-16]=null:O[r.to+16]=null),r.flags&I.PROMOTION&&(O[r.to]={type:r.promotion,color:n}),O[r.to].type===p){if(k[O[r.to].color]=r.to,r.flags&I.KSIDE_CASTLE){var o=r.to-1,i=r.to+1;O[o]=O[i],O[i]=null}else if(r.flags&I.QSIDE_CASTLE){o=r.to+1,i=r.to-2;O[o]=O[i],O[i]=null}D[n]=""}if(D[n])for(var f=0,a=E[n].length;f<a;f++)if(r.from===E[n][f].square&&D[n]&E[n][f].flag){D[n]^=E[n][f].flag;break}if(D[t])for(f=0,a=E[t].length;f<a;f++)if(r.to===E[t][f].square&&D[t]&E[t][f].flag){D[t]^=E[t][f].flag;break}K=r.flags&I.BIG_PAWN?"b"===q?r.to-16:r.to+16:l,r.piece===_||r.flags&(I.CAPTURE|I.EP_CAPTURE)?d=0:d++,q===u&&b++,q=ar(q)}function nr(){var r=Q.pop();if(null==r)return null;var e=r.move;k=r.kings,q=r.turn,D=r.castling,K=r.ep_square,d=r.half_moves,b=r.move_number;var n,t,o=q,i=ar(q);if(O[e.from]=O[e.to],O[e.from].type=e.piece,O[e.to]=null,e.flags&I.CAPTURE)O[e.to]={type:e.captured,color:i};else if(e.flags&I.EP_CAPTURE){var f;f=o===u?e.to-16:e.to+16,O[f]={type:_,color:i}}e.flags&(I.KSIDE_CASTLE|I.QSIDE_CASTLE)&&(e.flags&I.KSIDE_CASTLE?(n=e.to+1,t=e.to-1):e.flags&I.QSIDE_CASTLE&&(n=e.to-2,t=e.to+1),O[n]=O[t],O[t]=null);return e}function tr(r,e){var n=J(r);if(e){var t=n.match(/([pnbrqkPNBRQK])?([a-h][1-8])x?-?([a-h][1-8])([qrbnQRBN])?/);if(t)var o=t[1],i=t[2],f=t[3],a=t[4]}for(var l=Z(),u=0,s=l.length;u<s;u++){if(n===J(z(l[u]))||e&&n===J(z(l[u],!0)))return l[u];if(t&&(!o||o.toLowerCase()==l[u].piece)&&N[i]==l[u].from&&N[f]==l[u].to&&(!a||a.toLowerCase()==l[u].promotion))return l[u]}return null}function or(r){return r>>4}function ir(r){return 15&r}function fr(r){var e=ir(r),n=or(r);return"abcdefgh".substring(e,e+1)+"87654321".substring(n,n+1)}function ar(r){return r===s?u:s}function lr(r){var e=function r(e){var n=e instanceof Array?[]:{};for(var t in e)n[t]="object"==typeof t?r(e[t]):e[t];return n}(r);e.san=z(e,!1),e.to=fr(e.to),e.from=fr(e.from);var n="";for(var t in I)I[t]&e.flags&&(n+=o[t]);return e.flags=n,e}function ur(r){return r.replace(/^\s+|\s+$/g,"")}return B(void 0===r?e:r),{WHITE:s,BLACK:u,PAWN:_,KNIGHT:A,BISHOP:S,ROOK:m,QUEEN:y,KING:p,SQUARES:function(){for(var r=[],e=N.a8;e<=N.h1;e++)136&e?e+=7:r.push(fr(e));return r}(),FLAGS:o,load:function(r){return B(r)},reset:function(){return j()},moves:function(r){for(var e=Z(r),n=[],t=0,o=e.length;t<o;t++)void 0!==r&&"verbose"in r&&r.verbose?n.push(lr(e[t])):n.push(z(e[t],!1));return n},in_check:function(){return f()},in_checkmate:function(){return a()},in_stalemate:function(){return n()},in_draw:function(){return 100<=d||n()||Y()||rr()},insufficient_material:function(){return Y()},in_threefold_repetition:function(){return rr()},game_over:function(){return 100<=d||a()||n()||Y()||rr()},validate_fen:function(r){return $(r)},fen:function(){return M()},board:function(){for(var r=[],e=[],n=N.a8;n<=N.h1;n++)null==O[n]?e.push(null):e.push({type:O[n].type,color:O[n].color}),n+1&136&&(r.push(e),e=[],n+=8);return r},pgn:function(r){var e="object"==typeof r&&"string"==typeof r.newline_char?r.newline_char:"\n",n="object"==typeof r&&"number"==typeof r.max_width?r.max_width:0,t=[],o=!1;for(var i in U)t.push("["+i+' "'+U[i]+'"]'+e),o=!0;o&&Q.length&&t.push(e);for(var f=[];0<Q.length;)f.push(nr());for(var a=[],l="";0<f.length;){var u=f.pop();Q.length||"b"!==u.color?"w"===u.color&&(l.length&&a.push(l),l=b+"."):l=b+". ...",l=l+" "+z(u,!1),er(u)}if(l.length&&a.push(l),void 0!==U.Result&&a.push(U.Result),0===n)return t.join("")+a.join(" ");var s=0;for(i=0;i<a.length;i++)s+a[i].length>n&&0!==i?(" "===t[t.length-1]&&t.pop(),t.push(e),s=0):0!==i&&(t.push(" "),s++),t.push(a[i]),s+=a[i].length;return t.join("")},load_pgn:function(r,e){var n=void 0!==e&&"sloppy"in e&&e.sloppy;function l(r){return r.replace(/\\/g,"\\")}var t="object"==typeof e&&"string"==typeof e.newline_char?e.newline_char:"\r?\n",o=new RegExp("^(\\[((?:"+l(t)+")|.)*\\])(?:"+l(t)+"){2}"),i=o.test(r)?o.exec(r)[1]:"";j();var f=function(r,e){for(var n="object"==typeof e&&"string"==typeof e.newline_char?e.newline_char:"\r?\n",t={},o=r.split(new RegExp(l(n))),i="",f="",a=0;a<o.length;a++)i=o[a].replace(/^\[([A-Z][A-Za-z]*)\s.*\]$/,"$1"),f=o[a].replace(/^\[[A-Za-z]+\s"(.*)"\]$/,"$1"),0<ur(i).length&&(t[i]=f);return t}(i,e);for(var a in f)G([a,f[a]]);if("1"===f.SetUp&&!("FEN"in f&&B(f.FEN,!0)))return!1;var u=r.replace(i,"").replace(new RegExp(l(t),"g")," ");u=u.replace(/(\{[^}]+\})+?/g,"");for(var s=/(\([^\(\)]+\))+?/g;s.test(u);)u=u.replace(s,"");var p=ur(u=(u=(u=u.replace(/\d+\.(\.\.)?/g,"")).replace(/\.\.\./g,"")).replace(/\$\d+/g,"")).split(new RegExp(/\s+/));p=p.join(",").replace(/,,+/g,",").split(",");for(var c="",v=0;v<p.length-1;v++){if(null==(c=tr(p[v],n)))return!1;er(c)}if(c=p[p.length-1],-1<g.indexOf(c))!function(r){for(var e in r)return 1}(U)||void 0!==U.Result||G(["Result",c]);else{if(null==(c=tr(c,n)))return!1;er(c)}return!0},header:function(){return G(arguments)},ascii:function(){return function(){for(var r="   +------------------------+\n",e=N.a8;e<=N.h1;e++){if(0===ir(e)&&(r+=" "+"87654321"[or(e)]+" |"),null==O[e])r+=" . ";else{var n=O[e].type;r+=" "+(O[e].color===s?n.toUpperCase():n.toLowerCase())+" "}e+1&136&&(r+="|\n",e+=8)}return r+="   +------------------------+\n",r+="     a  b  c  d  e  f  g  h\n"}()},turn:function(){return q},move:function(r,e){var n=void 0!==e&&"sloppy"in e&&e.sloppy,t=null;if("string"==typeof r)t=tr(r,n);else if("object"==typeof r)for(var o=Z(),i=0,f=o.length;i<f;i++)if(!(r.from!==fr(o[i].from)||r.to!==fr(o[i].to)||"promotion"in o[i]&&r.promotion!==o[i].promotion)){t=o[i];break}if(!t)return null;var a=lr(t);return er(t),a},undo:function(){var r=nr();return r?lr(r):null},clear:function(){return x()},put:function(r,e){return W(r,e)},get:function(r){return i(r)},remove:function(r){return n=i(e=r),O[N[e]]=null,n&&n.type===p&&(k[n.color]=l),F(M()),n;var e,n},perft:function(r){return function r(e){for(var n=Z({legal:!1}),t=0,o=q,i=0,f=n.length;i<f;i++)er(n[i]),X(o)||(0<e-1?t+=r(e-1):t++),nr();return t}(r)},square_color:function(r){if(r in N){var e=N[r];return(or(e)+ir(e))%2==0?"light":"dark"}return null},history:function(r){for(var e=[],n=[],t=(void 0!==r&&"verbose"in r&&r.verbose);0<Q.length;)e.push(nr());for(;0<e.length;){var o=e.pop();t?n.push(lr(o)):n.push(z(o)),er(o)}return n}}};"undefined"!=typeof exports&&(exports.Chess=Chess),"undefined"!=typeof define&&define(function(){return Chess});--- END FILE: public/chess.min.js ---
+
+--- FILE: public/style.css ---
+/* ==========================================================================
+   CHESS — compact olive-green theme
+   Matches app.js exactly. No JS changes needed.
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+  --bg: #141810;
+  --bg-2: #1a2013;
+  --surface: #1f2716;
+  --surface-2: #262f1c;
+  --line: #2f3a24;
+  --line-2: #3d4b2e;
+  --ink: #f1f4e8;
+  --ink-soft: #b8c0a8;
+  --muted: #8a9478;
+  --olive: #9bc96c;         /* light green accent for text/links */
+  --olive-bright: #b9e08a;  /* active highlight */
+  --olive-dark: #5f9136;
+  --olive-deep: #3d5f22;
+  --cream: #eeeed2;
+  --brown: #769656;
+  --danger: #e0684f;
+  --radius: 14px;
+  --radius-lg: 20px;
+  --font: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { min-height: 100%; }
+
+body {
+  background:
+    radial-gradient(ellipse at 50% -30%, rgba(155, 201, 108, 0.10), transparent 55%),
+    radial-gradient(ellipse at 100% 100%, rgba(118, 150, 86, 0.06), transparent 50%),
+    var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============ HEADER ============ */
+.topbar {
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(20, 24, 16, 0.85);
+  backdrop-filter: blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--olive);
+  color: #14200a;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.brand-name {
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 2px;
+}
+
+.top-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d99a55;
+  transition: all .3s;
+}
+
+.live-dot.connected {
+  background: var(--olive);
+  box-shadow: 0 0 10px var(--olive);
+}
+
+/* ============ LAYOUT ============ */
+.layout {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 24px 20px 40px;
+}
+
+/* ============ LOBBY ============ */
+.lobby {
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+.hero {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.eyebrow {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--olive);
+  padding: 6px 12px;
+  border: 1px solid rgba(155, 201, 108, 0.35);
+  border-radius: 999px;
+  margin-bottom: 16px;
+}
+
+.hero h1 {
+  font-size: clamp(32px, 6vw, 48px);
+  font-weight: 800;
+  letter-spacing: -1.5px;
+  line-height: 1.05;
+  margin-bottom: 12px;
+  color: var(--ink);
+}
+
+.hero h1 em {
+  font-style: italic;
+  font-weight: 500;
+  color: var(--olive);
+}
+
+.hero p {
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: 340px;
+  margin: 0 auto;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.card-head .label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--muted);
+}
+
+.card-head .icon {
+  font-size: 26px;
+  color: var(--olive);
+  opacity: 0.85;
+}
+
+.field-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  margin: 16px 0 8px;
+}
+
+.text-input {
+  width: 100%;
+  height: 46px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0 14px;
+  color: var(--ink);
+  font: 500 15px var(--font);
+  outline: none;
+  transition: all .15s;
+}
+
+.text-input:focus {
+  border-color: var(--olive);
+  box-shadow: 0 0 0 3px rgba(155, 201, 108, 0.18);
+}
+
+.text-input::placeholder { color: #5a6650; }
+
+.code-input {
+  letter-spacing: 4px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 16px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+/* ============ BUTTONS ============ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 10px;
+  font: 700 14px var(--font);
+  cursor: pointer;
+  transition: all .15s;
+  text-decoration: none;
+}
+
+.btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.btn:active { transform: translateY(0); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+.btn-primary {
+  background: var(--olive);
+  color: #14200a;
+}
+
+.btn-create {
+  width: 100%;
+  margin-top: 16px;
+  justify-content: space-between;
+  padding: 0 18px;
+}
+
+.btn-create .arrow {
+  font-size: 18px;
+}
+
+.btn-secondary {
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--line-2);
+}
+
+.btn-danger {
+  background: rgba(224, 104, 79, 0.12);
+  color: var(--danger);
+  border: 1px solid rgba(224, 104, 79, 0.35);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+}
+
+.btn-ghost-sm {
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  padding: 6px 12px;
+  font-size: 11px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all .15s;
+}
+
+.btn-ghost-sm:hover {
+  color: var(--ink);
+  border-color: var(--line-2);
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0 4px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.join-row {
+  display: flex;
+  gap: 8px;
+}
+
+.join-row .text-input { flex: 1; min-width: 0; }
+.join-row .btn { padding: 0 18px; flex-shrink: 0; }
+
+.error-text {
+  color: var(--danger);
+  font-size: 12px;
+  margin-top: 10px;
+  min-height: 14px;
+}
+
+.privacy-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 10px 12px;
+  background: rgba(155, 201, 108, 0.04);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ============ GAME VIEW ============ */
+.game-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.game-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.game-topline .label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  display: block;
+  margin-bottom: 2px;
+}
+
+.room-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+}
+
+.room-line strong {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: var(--olive);
+}
+
+.copy-btn {
+  background: transparent;
+  border: none;
+  color: var(--olive);
+  font: 700 11px var(--font);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background .15s;
+}
+
+.copy-btn:hover { background: rgba(155, 201, 108, 0.12); }
+
+.game-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap: 12px;
+  align-items: start;
+}
+
+/* Board panel */
+.board-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.player-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 2px 10px;
+}
+
+.self-strip {
+  padding: 10px 2px 6px;
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  background: var(--surface-2);
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+}
+
+.self-avatar {
+  background: var(--olive);
+  color: #14200a;
+  border-color: var(--olive);
+}
+
+.player-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.player-info strong {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.player-info span {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.clock {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  min-width: 70px;
+  text-align: center;
+  letter-spacing: 0.5px;
+}
+
+.clock.active-clock {
+  background: var(--olive-bright);
+  color: #14200a;
+  border-color: var(--olive-bright);
+}
+
+/* Chess board */
+.board-frame {
+  border-radius: 4px;
+  overflow: hidden;
+  border: 3px solid var(--line-2);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.square {
+  position: relative;
+  border: none;
+  padding: 0;
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  min-width: 0;
+  transition: background .1s;
+}
+
+.square.light { background: #eeeed2; }
+.square.dark  { background: #769656; }
+
+.square.selected { box-shadow: inset 0 0 0 3px var(--olive-bright); }
+.square.light.last-move, .square.dark.last-move { background-color: #f6f669 !important; box-shadow: inset 0 0 0 3px #b8b800 !important; }
+
+.piece {
+  font-family: 'Segoe UI Symbol', 'Noto Sans Symbols 2', serif;
+  font-size: clamp(26px, 5.5vw, 46px);
+  line-height: 1;
+  z-index: 2;
+  position: relative;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
+}
+
+.piece.white {
+  color: #fffdf4;
+  text-shadow: 0 1px 1px #35352b, 1px 0 #35352b, -1px 0 #35352b, 0 -1px #35352b;
+}
+
+.piece.black {
+  color: #252821;
+  text-shadow: 0 1px 0 #f5f2df;
+}
+
+.square .dot {
+  position: absolute;
+  width: 22%;
+  height: 22%;
+  border-radius: 50%;
+  background: rgba(32, 45, 30, 0.4);
+  z-index: 3;
+}
+
+.square .capture-ring {
+  position: absolute;
+  inset: 5%;
+  border-radius: 50%;
+  border: 3px solid rgba(32, 45, 30, 0.45);
+  z-index: 3;
+}
+
+.square .coord {
+  position: absolute;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.square .coord.rank { top: 3px; left: 3px; }
+.square .coord.file { bottom: 3px; right: 3px; }
+.square.light .coord { color: #7a6549; }
+.square.dark .coord { color: #eeeed2; }
+
+.board-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  gap: 10px;
+}
+
+.board-footer > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.turn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--olive);
+}
+
+/* Side panel */
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.panel-head .label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+}
+
+.status-badge {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--olive);
+  background: rgba(155, 201, 108, 0.12);
+  border: 1px solid rgba(155, 201, 108, 0.3);
+  padding: 4px 8px;
+  border-radius: 5px;
+}
+
+.status-panel h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  color: var(--ink);
+}
+
+.status-panel > p {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.invite-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: var(--bg-2);
+  border: 1px dashed var(--line-2);
+  border-radius: 9px;
+}
+
+.invite-box > span {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.invite-box > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.invite-box strong {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  color: var(--olive);
+}
+
+.moves-panel .panel-head h3 {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.moves-panel .panel-head > span {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.move-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 0 -4px;
+}
+
+.empty-moves {
+  text-align: center;
+  padding: 16px 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.move-pair {
+  display: grid;
+  grid-template-columns: 24px 1fr 1fr;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.move-pair:nth-child(even) {
+  background: rgba(155, 201, 108, 0.03);
+}
+
+.move-no {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.move-san {
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+}
+
+.move-san.latest { color: var(--olive); }
+
+.captured-panel .label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.captured-row {
+  display: grid;
+  grid-template-columns: 65px 1fr;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.captured-row > span {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--muted);
+}
+
+.captured-pieces {
+  font-size: 18px;
+  letter-spacing: -2px;
+  min-height: 20px;
+  color: var(--cream);
+  overflow-wrap: anywhere;
+}
+
+.action-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.action-row .btn { min-height: 40px; font-size: 12px; }
+
+.rematch-btn {
+  width: 100%;
+  min-height: 42px;
+}
+
+.hidden { display: none !important; }
+
+.game-notice {
+  min-height: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--olive);
+  margin-top: 6px;
+}
+
+.error-toast { color: var(--danger) !important; }
+
+/* ============ PROMOTION DIALOG ============ */
+.promotion-dialog {
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 24px;
+  width: min(340px, calc(100% - 32px));
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
+}
+
+.promotion-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+}
+
+.promotion-dialog h3 {
+  font-size: 18px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.promotion-dialog p {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+
+.promotion-options {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.promo-piece {
+  font-family: 'Segoe UI Symbol', serif;
+  font-size: 32px;
+  aspect-ratio: 1;
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  color: var(--cream);
+  cursor: pointer;
+  transition: all .15s;
+}
+
+.promo-piece:hover {
+  background: var(--olive);
+  color: #14200a;
+  border-color: var(--olive);
+}
+
+.cancel-promo { width: 100%; }
+
+/* ============ MOBILE ============ */
+@media (max-width: 760px) {
+  .topbar { height: 54px; padding: 0 14px; }
+  .brand-name { font-size: 12px; letter-spacing: 1.5px; }
+  .brand-mark { width: 28px; height: 28px; font-size: 18px; }
+  .top-status { font-size: 11px; }
+
+  .layout { padding: 16px 12px 24px; }
+
+  .hero { margin-bottom: 20px; }
+  .hero h1 { font-size: 34px; }
+  .hero p { font-size: 13px; }
+  .eyebrow { font-size: 9px; padding: 4px 10px; margin-bottom: 12px; }
+
+  .card { padding: 18px; }
+
+  .game-topline { padding: 10px 14px; }
+  .room-line { font-size: 16px; }
+  .room-line strong { letter-spacing: 2px; }
+
+  .game-grid { grid-template-columns: 1fr; gap: 10px; }
+
+  .board-panel { padding: 8px; }
+
+  .player-strip { gap: 8px; padding: 4px 2px 8px; }
+  .self-strip { padding: 8px 2px 4px; }
+  .avatar { width: 28px; height: 28px; font-size: 17px; }
+  .player-info strong { font-size: 11px; }
+  .player-info span { font-size: 9px; }
+  .clock { font-size: 12px; padding: 4px 8px; min-width: 60px; }
+
+  .piece { font-size: clamp(24px, 10vw, 40px); }
+
+  .side-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .panel { padding: 12px; }
+  .status-panel { grid-column: 1 / -1; }
+  .moves-panel { grid-column: 1 / -1; }
+  .captured-panel { grid-column: 1; }
+  .action-row { grid-column: 2; align-self: start; }
+  .rematch-btn { grid-column: 1 / -1; }
+
+  .status-panel h3 { font-size: 14px; }
+  .invite-box strong { font-size: 17px; letter-spacing: 3px; }
+
+  .move-list { max-height: 140px; }
+  .move-pair { font-size: 10px; padding: 4px 6px; }
+
+  .captured-pieces { font-size: 16px; }
+}
+
+@media (max-width: 380px) {
+  .layout { padding: 12px 8px 20px; }
+  .hero h1 { font-size: 28px; }
+  .card { padding: 16px; }
+  .join-row { flex-direction: column; }
+  .join-row .btn { width: 100%; }
+  .piece { font-size: clamp(22px, 9.5vw, 36px); }
+  .side-panel { grid-template-columns: 1fr; }
+  .captured-panel, .action-row { grid-column: 1; }
+}
+
+@media (min-width: 1000px) {
+  .board-panel { padding: 16px; }
+  .board-frame { border-width: 4px; }
+  .side-panel { position: sticky; top: 76px; }
+}
+
+/* King in check: red square */
+.square.checked-king {
+  background-color: #d44a3f !important;
+  box-shadow: inset 0 0 0 3px #f2665d !important;
+}
+.square.checked-king .piece {
+  color: #fffdf4 !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.7), 1px 0 rgba(0,0,0,0.7), -1px 0 rgba(0,0,0,0.7), 0 -1px rgba(0,0,0,0.7) !important;
+}
+
+.square.checked-king {
+  background-color: #d44a3f !important;
+  box-shadow: inset 0 0 0 3px #f2665d !important;
+}
+.square.checked-king .piece {
+  color: #fffdf4 !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.7), 1px 0 rgba(0,0,0,0.7), -1px 0 rgba(0,0,0,0.7), 0 -1px rgba(0,0,0,0.7) !important;
+}
+
+
+/* When inside food menu iframe: keep only the status dot, hide the text */
+body.embedded .top-status #connectionText { display: none; }
+body.embedded .top-status .live-dot { margin: 0; }
+body.embedded .topbar { padding-right: 90px; }
+
+
+
+/* Inside iframe: status dot on left, no text */
+body.embedded .topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+body.embedded .brand {
+  flex-shrink: 0;
+}
+body.embedded .top-status {
+  order: 0;
+  margin-left: 4px;
+}
+body.embedded .top-status #connectionText {
+  display: none;
+}
+body.embedded .top-status .live-dot {
+  margin: 0;
+}
+
+.square.light.replay-last-move,
+.square.dark.replay-last-move {
+  background-color: #f6f669 !important;
+  box-shadow: inset 0 0 0 3px #b8b800 !important;
+}
+.square.replay-last-move .piece { z-index: 3; }
+
+/* SVG piece rendering */
+.square .piece {
+  width: 90%;
+  height: 90%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0 !important;
+  text-shadow: none !important;
+  filter: none;
+}
+.square .piece img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* ============ CHESS MODAL ============ */
+.chess-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.chess-modal-backdrop.open { display: flex; }
+
+.chess-modal {
+  background: var(--surface, #1f1c18);
+  border: 1px solid var(--line, #302b24);
+  border-radius: 16px;
+  max-width: 380px;
+  width: 100%;
+  padding: 24px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  animation: chessModalIn 0.2s ease;
+}
+@keyframes chessModalIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.chess-modal h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--ink, #f2ecdf);
+}
+.chess-modal p {
+  margin: 0 0 20px;
+  font-size: 14px;
+  color: var(--ink-soft, #b8afa0);
+  line-height: 1.5;
+}
+
+.chess-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.chess-modal-btn {
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--line, #302b24);
+  background: var(--surface-2, #26221d);
+  color: var(--ink, #f2ecdf);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  min-width: 80px;
+}
+.chess-modal-btn:hover { filter: brightness(1.15); }
+.chess-modal-btn.primary {
+  background: var(--olive, #9bc96c);
+  color: #14200a;
+  border-color: var(--olive, #9bc96c);
+}
+.chess-modal-btn.danger {
+  background: rgba(224, 104, 79, 0.15);
+  color: #e0684f;
+  border-color: rgba(224, 104, 79, 0.4);
+}
+.chess-modal-btn.danger:hover { background: rgba(224, 104, 79, 0.25); }
+
+/* RTL support */
+.chess-modal[dir="rtl"] .chess-modal-actions { justify-content: flex-start; }
+--- END FILE: public/style.css ---
+
+--- FILE: public/styles.css ---
+/* ==========================================================================
+   CHESS — compact premium UI. IDs and classes match app.js exactly.
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+  --bg: #141210;
+  --bg-2: #1a1714;
+  --surface: #1f1c18;
+  --surface-2: #26221d;
+  --line: #302b24;
+  --line-2: #3d372e;
+  --ink: #f2ecdf;
+  --ink-soft: #b8afa0;
+  --muted: #8a8172;
+  --accent: #c9a15f;       /* warm gold */
+  --accent-soft: #e6c98f;
+  --olive: #7fa650;
+  --danger: #e0684f;
+  --cream: #f0e6d2;
+  --radius: 14px;
+  --radius-lg: 20px;
+  --font: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { min-height: 100%; }
+
+body {
+  background:
+    radial-gradient(ellipse at 50% -30%, rgba(201, 161, 95, 0.08), transparent 55%),
+    radial-gradient(ellipse at 100% 100%, rgba(127, 166, 80, 0.05), transparent 50%),
+    var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============ HEADER ============ */
+.topbar {
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(20, 18, 16, 0.8);
+  backdrop-filter: blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #1a1410;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.brand-name {
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 2px;
+}
+
+.top-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d99a55;
+  transition: all .3s;
+}
+
+.live-dot.connected {
+  background: var(--olive);
+  box-shadow: 0 0 10px var(--olive);
+}
+
+/* ============ LAYOUT ============ */
+.layout {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 24px 20px 40px;
+}
+
+/* ============ LOBBY ============ */
+.lobby {
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+.hero {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.eyebrow {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--accent);
+  padding: 6px 12px;
+  border: 1px solid rgba(201, 161, 95, 0.3);
+  border-radius: 999px;
+  margin-bottom: 16px;
+}
+
+.hero h1 {
+  font-size: clamp(32px, 6vw, 48px);
+  font-weight: 800;
+  letter-spacing: -1.5px;
+  line-height: 1.05;
+  margin-bottom: 12px;
+  color: var(--ink);
+}
+
+.hero h1 em {
+  font-style: italic;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.hero p {
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: 340px;
+  margin: 0 auto;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.card-head .label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--muted);
+}
+
+.card-head .icon {
+  font-size: 26px;
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.field-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  margin: 16px 0 8px;
+}
+
+.text-input {
+  width: 100%;
+  height: 46px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0 14px;
+  color: var(--ink);
+  font: 500 15px var(--font);
+  outline: none;
+  transition: all .15s;
+}
+
+.text-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(201, 161, 95, 0.15);
+}
+
+.text-input::placeholder { color: #5a5347; }
+
+.code-input {
+  letter-spacing: 4px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 16px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+/* ============ BUTTONS ============ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 10px;
+  font: 700 14px var(--font);
+  cursor: pointer;
+  transition: all .15s;
+  text-decoration: none;
+}
+
+.btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.btn:active { transform: translateY(0); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+.btn-primary {
+  background: var(--accent);
+  color: #1a1410;
+}
+
+.btn-create {
+  width: 100%;
+  margin-top: 16px;
+  justify-content: space-between;
+  padding: 0 18px;
+}
+
+.btn-create .arrow {
+  font-size: 18px;
+}
+
+.btn-secondary {
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--line-2);
+}
+
+.btn-danger {
+  background: rgba(224, 104, 79, 0.12);
+  color: var(--danger);
+  border: 1px solid rgba(224, 104, 79, 0.35);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+}
+
+.btn-ghost-sm {
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  padding: 6px 12px;
+  font-size: 11px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all .15s;
+}
+
+.btn-ghost-sm:hover {
+  color: var(--ink);
+  border-color: var(--line-2);
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0 4px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.join-row {
+  display: flex;
+  gap: 8px;
+}
+
+.join-row .text-input { flex: 1; min-width: 0; }
+.join-row .btn { padding: 0 18px; flex-shrink: 0; }
+
+.error-text {
+  color: var(--danger);
+  font-size: 12px;
+  margin-top: 10px;
+  min-height: 14px;
+}
+
+.privacy-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ============ GAME VIEW ============ */
+.game-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.game-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.game-topline .label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  display: block;
+  margin-bottom: 2px;
+}
+
+.room-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+}
+
+.room-line strong {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: var(--accent);
+}
+
+.copy-btn {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font: 700 11px var(--font);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background .15s;
+}
+
+.copy-btn:hover { background: rgba(201, 161, 95, 0.1); }
+
+.game-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap: 12px;
+  align-items: start;
+}
+
+/* Board panel */
+.board-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.player-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 2px 10px;
+}
+
+.self-strip {
+  padding: 10px 2px 6px;
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  background: var(--surface-2);
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+}
+
+.self-avatar {
+  background: var(--accent);
+  color: #1a1410;
+  border-color: var(--accent);
+}
+
+.player-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.player-info strong {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.player-info span {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.clock {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+}
+
+.clock.active-clock {
+  background: var(--accent);
+  color: #1a1410;
+  border-color: var(--accent);
+}
+
+/* Chess board */
+.board-frame {
+  border-radius: 4px;
+  overflow: hidden;
+  border: 3px solid var(--line-2);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.square {
+  position: relative;
+  border: none;
+  padding: 0;
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  min-width: 0;
+  transition: background .1s;
+}
+
+.square.light { background: #eeeed2; }
+.square.dark  { background: #769656; }
+
+.square.selected { box-shadow: inset 0 0 0 3px var(--accent); }
+.square.last-move { background-image: linear-gradient(rgba(201, 161, 95, 0.35), rgba(201, 161, 95, 0.35)); }
+
+.piece {
+  font-family: 'Segoe UI Symbol', 'Noto Sans Symbols 2', serif;
+  font-size: clamp(26px, 5.5vw, 46px);
+  line-height: 1;
+  z-index: 2;
+  position: relative;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
+}
+
+.piece.white {
+  color: #fffdf5;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 1px 0 rgba(0, 0, 0, 0.5), -1px 0 rgba(0, 0, 0, 0.5), 0 -1px rgba(0, 0, 0, 0.5);
+}
+
+.piece.black {
+  color: #1f1a14;
+  text-shadow: 0 1px 0 rgba(240, 230, 210, 0.5);
+}
+
+.square .dot {
+  position: absolute;
+  width: 22%;
+  height: 22%;
+  border-radius: 50%;
+  background: rgba(26, 20, 16, 0.35);
+  z-index: 3;
+}
+
+.square .capture-ring {
+  position: absolute;
+  inset: 5%;
+  border-radius: 50%;
+  border: 3px solid rgba(26, 20, 16, 0.4);
+  z-index: 3;
+}
+
+.square .coord {
+  position: absolute;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.square .coord.rank { top: 3px; left: 3px; }
+.square .coord.file { bottom: 3px; right: 3px; }
+.square.light .coord { color: #7a6549; }
+.square.dark .coord { color: #f0e6d2; }
+
+.board-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  gap: 10px;
+}
+
+.board-footer > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.turn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Side panel */
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.panel-head .label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+}
+
+.status-badge {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--accent);
+  background: rgba(201, 161, 95, 0.1);
+  border: 1px solid rgba(201, 161, 95, 0.3);
+  padding: 4px 8px;
+  border-radius: 5px;
+}
+
+.status-panel h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  color: var(--ink);
+}
+
+.status-panel > p {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.invite-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: var(--bg-2);
+  border: 1px dashed var(--line-2);
+  border-radius: 9px;
+}
+
+.invite-box > span {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.invite-box > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.invite-box strong {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  color: var(--accent);
+}
+
+.moves-panel .panel-head h3 {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.moves-panel .panel-head > span {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.move-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 0 -4px;
+}
+
+.empty-moves {
+  text-align: center;
+  padding: 16px 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.move-pair {
+  display: grid;
+  grid-template-columns: 24px 1fr 1fr;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.move-pair:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.move-no {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.move-san {
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+}
+
+.move-san.latest { color: var(--accent); }
+
+.captured-panel .label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.captured-row {
+  display: grid;
+  grid-template-columns: 65px 1fr;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.captured-row > span {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--muted);
+}
+
+.captured-pieces {
+  font-size: 18px;
+  letter-spacing: -2px;
+  min-height: 20px;
+  color: var(--cream);
+  overflow-wrap: anywhere;
+}
+
+.action-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.action-row .btn { min-height: 40px; font-size: 12px; }
+
+.rematch-btn {
+  width: 100%;
+  min-height: 42px;
+}
+
+.hidden { display: none !important; }
+
+.game-notice {
+  min-height: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--accent);
+  margin-top: 6px;
+}
+
+.error-toast { color: var(--danger) !important; }
+
+/* ============ PROMOTION DIALOG ============ */
+.promotion-dialog {
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 24px;
+  width: min(340px, calc(100% - 32px));
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
+}
+
+.promotion-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+}
+
+.promotion-dialog h3 {
+  font-size: 18px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.promotion-dialog p {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+
+.promotion-options {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.promo-piece {
+  font-family: 'Segoe UI Symbol', serif;
+  font-size: 32px;
+  aspect-ratio: 1;
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  color: var(--cream);
+  cursor: pointer;
+  transition: all .15s;
+}
+
+.promo-piece:hover {
+  background: var(--accent);
+  color: #1a1410;
+  border-color: var(--accent);
+}
+
+.cancel-promo { width: 100%; }
+
+/* ============ MOBILE ============ */
+@media (max-width: 760px) {
+  .topbar { height: 54px; padding: 0 14px; }
+  .brand-name { font-size: 12px; letter-spacing: 1.5px; }
+  .brand-mark { width: 28px; height: 28px; font-size: 18px; }
+  .top-status { font-size: 11px; }
+
+  .layout { padding: 16px 12px 24px; }
+
+  .hero { margin-bottom: 20px; }
+  .hero h1 { font-size: 34px; }
+  .hero p { font-size: 13px; }
+  .eyebrow { font-size: 9px; padding: 4px 10px; margin-bottom: 12px; }
+
+  .card { padding: 18px; }
+
+  .game-topline { padding: 10px 14px; }
+  .room-line { font-size: 16px; }
+  .room-line strong { letter-spacing: 2px; }
+
+  .game-grid { grid-template-columns: 1fr; gap: 10px; }
+
+  .board-panel { padding: 8px; }
+
+  .player-strip { gap: 8px; padding: 4px 2px 8px; }
+  .self-strip { padding: 8px 2px 4px; }
+  .avatar { width: 28px; height: 28px; font-size: 17px; }
+  .player-info strong { font-size: 11px; }
+  .player-info span { font-size: 9px; }
+  .clock { font-size: 12px; padding: 4px 8px; }
+
+  .piece { font-size: clamp(24px, 10vw, 40px); }
+
+  .side-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .panel { padding: 12px; }
+  .status-panel { grid-column: 1 / -1; }
+  .moves-panel { grid-column: 1 / -1; }
+  .captured-panel { grid-column: 1; }
+  .action-row { grid-column: 2; align-self: start; }
+  .rematch-btn { grid-column: 1 / -1; }
+
+  .status-panel h3 { font-size: 14px; }
+  .invite-box strong { font-size: 17px; letter-spacing: 3px; }
+
+  .move-list { max-height: 140px; }
+  .move-pair { font-size: 10px; padding: 4px 6px; }
+
+  .captured-pieces { font-size: 16px; }
+}
+
+@media (max-width: 380px) {
+  .layout { padding: 12px 8px 20px; }
+  .hero h1 { font-size: 28px; }
+  .card { padding: 16px; }
+  .join-row { flex-direction: column; }
+  .join-row .btn { width: 100%; }
+  .piece { font-size: clamp(22px, 9.5vw, 36px); }
+  .side-panel { grid-template-columns: 1fr; }
+  .captured-panel, .action-row { grid-column: 1; }
+}
+
+/* Wide screens: give the board a bit more breathing room */
+@media (min-width: 1000px) {
+  .board-panel { padding: 16px; }
+  .board-frame { border-width: 4px; }
+  .side-panel { position: sticky; top: 76px; }
+}
+
+/* Ensure clock is always visible */
+.clock {
+  min-width: 70px;
+  text-align: center;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--surface-2, #26221d);
+  color: var(--ink-soft, #b8afa0);
+  border: 1px solid var(--line, #302b24);
+}
+.clock.active-clock {
+  background: var(--accent, #c9a15f);
+  color: #1a1410;
+  border-color: var(--accent, #c9a15f);
+}
+
+/* Restore olive/green board colors (nicer than the cream/brown) */
+.square.light { background: #eeeed2 !important; }
+.square.dark  { background: #769656 !important; }
+.square.selected { box-shadow: inset 0 0 0 4px #f6f669 !important; }
+.square.last-move { background-image: linear-gradient(#f6f66980, #f6f66980) !important; }
+.square .dot { background: #202d1e70 !important; }
+.square .capture-ring { border-color: #202d1e80 !important; }
+
+/* Piece shadows on the green board */
+.piece.white {
+  color: #fffdf4;
+  text-shadow: 0 1px 1px #35352b, 1px 0 #35352b, -1px 0 #35352b, 0 -1px #35352b;
+}
+.piece.black {
+  color: #252821;
+  text-shadow: 0 1px 0 #f5f2df;
+}
+--- END FILE: public/styles.css ---
+
+--- FILE: package.json ---
+{
+  "name": "chess-online-render",
+  "version": "1.0.0",
+  "description": "Real-time two-player chess with Node.js, Express, Socket.IO and chess.js",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.18.0",
+    "chess.js": "^1.4.0",
+    "dotenv": "^18.0.9",
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1"
+  }
+}
+--- END FILE: package.json ---
+
+--- FILE: next.config.ts ---
+Not found
+--- END FILE: next.config.ts ---

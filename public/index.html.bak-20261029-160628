@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#141210">
+  <meta name="description" content="Private real-time chess with a friend.">
+  <title>Chess — Play Online</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="preload" as="image" href="/pieces/cburnett/wK.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/wQ.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/wR.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/wB.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/wN.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/wP.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/bK.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/bQ.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/bR.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/bB.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/bN.svg">
+  <link rel="preload" as="image" href="/pieces/cburnett/bP.svg">
+</head>
+<body>
+  <script>if(window.self!==window.top)document.body.classList.add("embedded");</script>
+  <script>if (window.self !== window.top) document.body.classList.add("embedded");</script>
+  <header class="topbar">
+    <a href="/" class="brand">
+      <span class="brand-mark">♞</span>
+      <span class="brand-name">CHESS</span>
+    </a>
+    <a href="/history.html" class="btn-ghost-sm" style="margin-right:12px; color:var(--ink-soft); text-decoration:none;">📜 History</a>
+    <span class="top-status">
+      <i class="live-dot"></i>
+      <span id="connectionText">Connecting</span>
+    </span>
+  </header>
+
+  <main class="layout">
+    <!-- LOBBY -->
+    <section id="lobby" class="lobby">
+      <div class="hero">
+        <span class="eyebrow">PRIVATE MATCH</span>
+        <h1>One board.<br><em>Two minds.</em></h1>
+        <p>Create a private room, share the code, play in real time from any device.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="label">Start a match</span>
+          <span class="icon">♜</span>
+        </div>
+
+        <label class="field-label" for="playerName">YOUR NAME</label>
+        <input id="playerName" class="text-input" maxlength="24" placeholder="Enter your name" autocomplete="nickname">
+
+        <button id="createBtn" class="btn btn-primary btn-create">
+          <span>♔ Create a room</span>
+          <span class="arrow">→</span>
+        </button>
+
+        <div class="divider"><span>OR JOIN A FRIEND</span></div>
+
+        <label class="field-label" for="roomCode">ROOM CODE</label>
+        <div class="join-row">
+          <input id="roomCode" class="text-input code-input" maxlength="6" placeholder="ABC123" autocomplete="off" autocapitalize="characters">
+          <button id="joinBtn" class="btn btn-secondary">Join</button>
+        </div>
+
+        <p id="lobbyError" class="error-text" role="status"></p>
+
+        <div class="privacy-note">
+          <span>🔒</span>
+          <span>Only people with your room code can join.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- GAME -->
+    <section id="game" class="game-shell hidden">
+      <div class="game-topline">
+        <div>
+          <span class="label">ROOM</span>
+          <div class="room-line">
+            <strong id="roomCodeLabel">——</strong>
+            <button id="copyCodeBtn" class="copy-btn" title="Copy room code">Copy</button>
+          </div>
+        </div>
+        <button id="leaveBtn" class="btn-ghost-sm">Leave ↗</button>
+      </div>
+
+      <div class="game-grid">
+        <section class="board-panel">
+          <div class="player-strip" id="opponentStrip">
+            <div class="avatar">♟</div>
+            <div class="player-info">
+              <strong id="opponentName">Waiting for opponent</strong>
+              <span id="opponentCaption">Share the room code</span>
+            </div>
+            <div class="clock" id="opponentClock">—:—</div>
+          </div>
+
+          <div class="board-frame">
+            <div id="board" class="board" aria-label="Chessboard"></div>
+          </div>
+
+          <div class="player-strip self-strip" id="selfStrip">
+            <div class="avatar self-avatar">♞</div>
+            <div class="player-info">
+              <strong id="selfName">You</strong>
+              <span id="selfCaption">You are White</span>
+            </div>
+            <div class="clock active-clock" id="selfClock">—:—</div>
+          </div>
+
+          <div class="board-footer">
+            <span id="turnIndicator"><i class="turn-dot"></i> Waiting for opponent</span>
+            <button id="flipBtn" class="btn-ghost-sm">⇅ Flip</button>
+          </div>
+        </section>
+
+        <aside class="side-panel">
+          <div class="panel status-panel">
+            <div class="panel-head">
+              <span class="label">MATCH STATUS</span>
+              <span id="statusBadge" class="status-badge">WAITING</span>
+            </div>
+            <h3 id="statusTitle">Waiting for a challenger</h3>
+            <p id="statusDescription">Send your room code to a friend. The game starts when they join.</p>
+            <div class="invite-box">
+              <span>INVITE CODE</span>
+              <div>
+                <strong id="inviteCode">——</strong>
+                <button id="copyInviteBtn" class="copy-btn" aria-label="Copy invite code">▣</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel moves-panel">
+            <div class="panel-head">
+              <h3>Move history</h3>
+              <span id="moveCount">0 moves</span>
+            </div>
+            <div id="moveList" class="move-list">
+              <div class="empty-moves">Your opening move will appear here.</div>
+            </div>
+          </div>
+
+          <div class="panel captured-panel">
+            <span class="label">CAPTURED PIECES</span>
+            <div class="captured-row">
+              <span>YOU</span>
+              <div id="capturedByYou" class="captured-pieces">—</div>
+            </div>
+            <div class="captured-row">
+              <span>OPPONENT</span>
+              <div id="capturedByOpponent" class="captured-pieces">—</div>
+            </div>
+          </div>
+
+          <div class="action-row">
+            <button id="drawBtn" class="btn btn-secondary">Offer draw</button>
+            <button id="resignBtn" class="btn btn-danger">Resign</button>
+          </div>
+          <button id="rematchBtn" class="btn btn-primary rematch-btn hidden">↻ Request rematch</button>
+        </aside>
+      </div>
+
+      <p id="gameNotice" class="game-notice" role="status"></p>
+    </section>
+  </main>
+
+  <dialog id="promotionDialog" class="promotion-dialog">
+    <form method="dialog">
+      <h3>Promote to</h3>
+      <p>Choose your piece</p>
+      <div class="promotion-options">
+        <button value="q" class="promo-piece" aria-label="Queen">♕</button>
+        <button value="r" class="promo-piece" aria-label="Rook">♖</button>
+        <button value="b" class="promo-piece" aria-label="Bishop">♗</button>
+        <button value="n" class="promo-piece" aria-label="Knight">♘</button>
+      </div>
+      <button value="cancel" class="btn-ghost cancel-promo">Cancel</button>
+    </form>
+  </dialog>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/chess.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
