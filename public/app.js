@@ -474,21 +474,7 @@
         img.src = src;
     });
 
-    /* --- IFRAME CONTROLS --- */
-    // Only run if we are inside an iframe
-    if (window.self !== window.top) {
-        const controls = document.getElementById("iframe-controls");
-        if (controls) controls.style.display = "flex";
-
-        // Close button
-        document.getElementById("btn-close").addEventListener("click", () => {
-            // Tries direct parent access first, then falls back to postMessage
-            try {
-                window.parent.closeIframe(); 
-            } catch (e) {
-                window.parent.postMessage("close", "*");
-            }
-        });
+    
 
         // Back button
         document.getElementById("btn-back").addEventListener("click", () => {
