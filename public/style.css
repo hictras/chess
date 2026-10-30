@@ -517,7 +517,7 @@ body {
 .square.dark  { background: #769656; }
 
 .square.selected { box-shadow: inset 0 0 0 3px var(--olive-bright); }
-.square.light.last-move, .square.dark.last-move { background-color: #f6f669 !important; box-shadow: inset 0 0 0 3px #b8b800 !important; }
+.square.light.last-move, .square.dark.last-move { background-color: #f6f669 !important; box-shadow: inset 0 0 0 1px #60600c36 !important; }
 
 .piece {
   font-family: 'Segoe UI Symbol', 'Noto Sans Symbols 2', serif;
