@@ -476,13 +476,4 @@
 
     
 
-        // Back button
-        document.getElementById("btn-back").addEventListener("click", () => {
-            try {
-                window.parent.history.back();
-            } catch (e) {
-                window.parent.postMessage("back", "*");
-            }
-        });
-    }
-})();
+        })();
