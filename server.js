@@ -54,6 +54,23 @@ const PORT = process.env.PORT || 3000;
 const rooms = new Map();
 global.rooms = rooms;
 
+function checkAdminAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Basic ")) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const base64Credentials = authHeader.split(" ")[1];
+  const credentials = Buffer.from(base64Credentials, "base64").toString("ascii");
+  const [username, password] = credentials.split(":");
+
+  if (username === (process.env.ADMIN_USERNAME || "admin") && 
+      password === (process.env.ADMIN_PASSWORD || "Hictrapass@1")) {
+    return next();
+  }
+  return res.status(401).json({ error: "Invalid credentials" });
+}
+
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/health", (_req, res) => {
@@ -129,7 +146,7 @@ app.get("/api/games/:id", async (req, res) => {
   }
 });
 
-app.delete("/api/games/:id", async (req, res) => {
+app.delete("/api/games/:id", checkAdminAuth, async (req, res) => {
   if (!db) return res.status(503).json({ error: "DB not configured" });
 
   try {
@@ -150,7 +167,7 @@ app.delete("/api/games/:id", async (req, res) => {
   }
 });
 
-app.delete("/api/games", async (_req, res) => {
+app.delete("/api/games", checkAdminAuth, async (_req, res) => {
   if (!db) return res.status(503).json({ error: "DB not configured" });
 
   try {
