@@ -283,7 +283,7 @@ body {
   color: var(--ink-soft);
   border: 1px solid var(--line);
   padding: 6px 12px;
-  margin-right:12px;
+  margin-right:2px;
   font-size: 13px;
   border-radius: 6px;
   cursor: pointer;
@@ -293,6 +293,25 @@ body {
 }
 
 .btn-ghost-sm:hover {
+  color: var(--ink);
+  border-color: var(--line-2);
+}
+
+.btn-ghost-back{
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  padding: 6px 12px;
+  margin-right:2px;
+  font-size: 13px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all .15s;
+  text-decoration:none;
+}
+
+.btn-ghost-back:hover {
   color: var(--ink);
   border-color: var(--line-2);
 }
