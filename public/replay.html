@@ -5,31 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Chess — Replay</title>
   <link rel="stylesheet" href="/style.css">
-  <style>
-    .replay-bar{display:flex;gap:10px;align-items:center;justify-content:center;margin:16px 0;flex-wrap:wrap}
-    .replay-bar button{padding:10px 18px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-weight:700;cursor:pointer}
-    .replay-bar button:disabled{opacity:.4;cursor:not-allowed}
-    .replay-bar button.primary{background:var(--olive);color:#14200a;border-color:var(--olive)}
-    .replay-info{text-align:center;margin-bottom:12px;font-size:13px;color:var(--muted)}
-    .replay-info strong{color:var(--ink);font-size:15px}
-    .move-time{font-size:10px;color:var(--muted);margin-left:6px;font-weight:400}
-    .mode-row{text-align:center;margin:8px 0;font-size:12px;color:var(--muted);display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
-    .mode-btn{padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);font-size:11px;font-weight:700;cursor:pointer}
-    .mode-btn.active{background:var(--olive);color:#14200a;border-color:var(--olive)}
-    .board-with-players{display:grid;grid-template-columns:140px 1fr 140px;gap:12px;align-items:center;max-width:820px;margin:0 auto}
-    .player-side{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
-    .player-side .avatar{width:36px;height:36px;border-radius:9px;background:var(--surface-2);color:var(--ink-soft);display:grid;place-items:center;font-size:22px;border:1px solid var(--line)}
-    .player-side.white .avatar{background:#eeeed2;color:#1a1410;border-color:#ddd5b8}
-    .player-side.black .avatar{background:#3a3834;color:#eeeed2;border-color:#555}
-    .player-side .name{font-size:12px;font-weight:700;text-align:center;word-break:break-word;max-width:100%}
-    .player-side .clock{font-family:var(--font-mono);font-size:13px;font-weight:700;background:var(--bg-2);color:var(--ink-soft);padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
-    @media(max-width:640px){
-      .board-with-players{grid-template-columns:1fr;gap:8px}
-      .player-side{flex-direction:row;justify-content:space-between;padding:8px 12px}
-      .player-side .name{text-align:left;font-size:12px}
-    }
-    }
-    </style>
   <link rel="preload" as="image" href="/pieces/cburnett/wK.svg">
   <link rel="preload" as="image" href="/pieces/cburnett/wQ.svg">
   <link rel="preload" as="image" href="/pieces/cburnett/wR.svg">
@@ -46,7 +21,7 @@
 <body>
   <header class="topbar">
     <a href="/" class="brand"><span class="brand-mark">♞</span><span class="brand-name">CHESS</span></a>
-    <a href="/history.html" class="btn-ghost-sm">← Back to History</a>
+    <a href="/history.html" class="btn-ghost-back">← Back to History</a>
   </header>
   <main class="layout">
     <div class="hero" style="margin-bottom:16px">
