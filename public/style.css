@@ -957,7 +957,7 @@ body.embedded .top-status .live-dot {
 .square.light.replay-last-move,
 .square.dark.replay-last-move {
   background-color: #f6f669 !important;
-  box-shadow: inset 0 0 0 3px #b8b800 !important;
+  box-shadow: inset 0 0 0 1px #60600c36 !important;
 }
 .square.replay-last-move .piece { z-index: 3; }
 
