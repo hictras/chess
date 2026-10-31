@@ -220,16 +220,16 @@
                     promotionDialog.showModal();
                 } else {
                     socket.emit("move", { from: state.selected, to: square });
-                    state.selected = null; state.legalTargets = []; renderBoard();
+                    state.selected = null; state.legalTargets = []; updateBoardUI();
                 }
                 return;
             }
             if (piece && piece.color === state.color) {
                 state.selected = square;
                 state.legalTargets = state.game.moves({ square, verbose: true }).map(m => m.to);
-                renderBoard();
+                updateBoardUI();
             } else {
-                state.selected = null; state.legalTargets = []; renderBoard();
+                state.selected = null; state.legalTargets = []; updateBoardUI();
             }
         }
 
@@ -373,7 +373,7 @@
                 });
             });
             promotionDialog.querySelector(".cancel-promo").addEventListener("click", () => {
-                state.pendingPromotion = null; state.selected = null; state.legalTargets = []; renderBoard();
+                state.pendingPromotion = null; state.selected = null; state.legalTargets = []; updateBoardUI();
             });
         }
     }
