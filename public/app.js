@@ -130,7 +130,7 @@
             return null;
         }
 
-        function renderBoard() {
+function renderBoard() {
             if (!state.game) return;
             const checkedKingSquare = findCheckedKingSquare(state.game);
             boardEl.innerHTML = "";
@@ -138,9 +138,17 @@
             const ranks = state.flipped ? "12345678" : "87654321";
             const fenRows = state.game.board();
             const boardMap = {};
-            fenRows.forEach((row, ri) => row.forEach((p, fi) => {
-                if (p) boardMap["abcdefgh"[fi] + (8 - ri)] = p;
-            }));
+
+            // Map chess.js 8x8 board array precisely (row 0 = rank 8, row 7 = rank 1)
+            fenRows.forEach((row, ri) => {
+                const rankNum = 8 - ri;
+                row.forEach((p, fi) => {
+                    if (p) {
+                        const fileChar = "abcdefgh"[fi];
+                        boardMap[fileChar + rankNum] = p;
+                    }
+                });
+            });
 
             for (let r = 0; r < 8; r++) {
                 for (let f = 0; f < 8; f++) {

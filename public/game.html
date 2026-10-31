@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, shrink-to-fit=no">
-    <title>Play Chess</title>
-    <link rel="stylesheet" href="/style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Play Chess</title>
+  <link rel="stylesheet" href="/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
     <button class="hamburger-btn" id="hamburgerBtn" aria-label="Menu">
@@ -13,233 +13,223 @@
     </button>
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
-    <aside class="sidebar">
-        <a href="/" class="brand"><span class="brand-mark">♞</span><span class="brand-name">CHESS</span></a>
-        <a href="/" class="nav-item"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg> Home</a>
-        <a href="/game.html" id="nav-play" class="nav-item"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Play</a>
-        <a href="/history.html#live" id="nav-live" class="nav-item"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="#ef4444" fill="rgba(239, 68, 68, 0.2)"/><path d="M12 8v4l3 3" stroke="#ef4444"/></svg> Live Games</a>
-        <a href="/history.html#history" id="nav-history" class="nav-item"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> History</a>
-        <a href="/history.html#archived" id="nav-archived" class="nav-item"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg> Archived</a>
-        <div class="sidebar-footer">Better moves.<br>Bigger goals.</div>
-    </aside>
 
-    <main class="main-content">
-        <div class="layout">
-            <section id="game" class="game-shell">
-                <div class="game-topline">
-                    <div>
-                        <span class="label">ROOM CODE</span>
-                        <div class="room-line">
-                            <strong id="roomCodeLabel">------</strong>
-                        </div>
-                    </div>
-                    <button type="button" id="leaveBtn" class="btn btn-ghost-sm">Leave Game</button>
-                </div>
 
-                <div class="game-grid">
-                    <div class="board-panel">
-                        <div class="player-strip">
-                            <div class="avatar">♝</div>
-                            <div class="player-info">
-                                <strong id="opponentName">Waiting for opponent</strong>
-                                <span id="opponentCaption">Share room code</span>
-                            </div>
-                            <div id="opponentClock" class="clock">10:00</div>
-                        </div>
-                        <div class="board-frame">
-                            <div id="board" class="board"></div>
-                        </div>
-                        <div class="player-strip self-strip">
-                            <div class="avatar self-avatar">♙</div>
-                            <div class="player-info">
-                                <strong id="selfName">You</strong>
-                                <span id="selfCaption">Playing White</span>
-                            </div>
-                            <div id="selfClock" class="clock">10:00</div>
-                        </div>
-                        <div class="board-footer">
-                            <span id="turnIndicator"><i class="turn-dot"></i> Waiting</span>
-                            <button type="button" id="flipBtn" class="btn btn-ghost-sm">Flip Board</button>
-                        </div>
-                    </div>
 
-                    <div class="side-panel">
-                        <!-- Chat Panel -->
-                        <div class="panel chat-panel">
-                            <div class="panel-head">
-                                <span class="label">GAME CHAT</span>
-                            </div>
-                            <div id="chatMessages" class="chat-messages"></div>
-                            <form id="chatForm" class="chat-form">
-                                <input type="text" id="chatInput" class="text-input" placeholder="Type a message..." autocomplete="off" maxlength="256">
-                                <button type="submit" id="chatSendBtn" class="btn btn-primary">Send</button>
-                            </form>
-                        </div>
 
-                        <!-- Status Panel -->
-                        <div class="panel status-panel">
-                            <div class="panel-head">
-                                <span class="label">STATUS</span>
-                                <span id="statusBadge" class="status-badge">WAITING</span>
-                            </div>
-                            <h3 id="statusTitle">Waiting for opponent</h3>
-                            <p id="statusDescription">Share the room code to invite them.</p>
-                            <div class="invite-box">
-                                <span>INVITE CODE</span>
-                                <div>
-                                    <strong id="inviteCode">------</strong>
-                                    <button type="button" id="copyInviteBtn" class="btn btn-ghost-sm">Copy</button>
-                                </div>
-                            </div>
-                        </div>
 
-                        <!-- Move History Panel -->
-                        <div class="panel moves-panel">
-                            <div class="panel-head">
-                                <h3>Move History</h3>
-                                <span id="moveCount">0 moves</span>
-                            </div>
-                            <div id="moveList" class="move-list">
-                                <div class="empty-moves">Your opening move will appear here.</div>
-                            </div>
-                        </div>
 
-                        <!-- Captured Pieces Panel -->
-                        <div class="panel captured-panel">
-                            <span class="label">CAPTURED PIECES</span>
-                            <div class="captured-row">
-                                <span>By You:</span>
-                                <div id="capturedByYou" class="captured-pieces">—</div>
-                            </div>
-                            <div class="captured-row">
-                                <span>By Opponent:</span>
-                                <div id="capturedByOpponent" class="captured-pieces">—</div>
-                            </div>
-                        </div>
+  <aside class="sidebar">
+    <a href="/" class="brand"><span class="brand-mark">♞</span><span class="brand-name">CHESS</span></a>
+    <a href="/" class="nav-item"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg> Home</a>
+    <a href="/game.html" id="nav-play" class="nav-item"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Play</a>
+    <a href="/history.html#live" id="nav-live" class="nav-item"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="#ef4444" fill="rgba(239, 68, 68, 0.2)"/><path d="M12 8v4l3 3" stroke="#ef4444"/></svg> Live Games</a>
+    <a href="/history.html#history" id="nav-history" class="nav-item"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> History</a>
+    <a href="/history.html#archived" id="nav-archived" class="nav-item"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg> Archived</a>
+    <div class="sidebar-footer">Better moves.<br>Bigger goals.</div>
+  </aside>
 
-                        <!-- Actions -->
-                        <div class="action-row">
-                            <button type="button" id="drawBtn" class="btn btn-secondary" disabled>Offer draw</button>
-                            <button type="button" id="resignBtn" class="btn btn-danger" disabled>Resign</button>
-                        </div>
-                        <button type="button" id="rematchBtn" class="btn btn-primary rematch-btn hidden">↻ Request rematch</button>
-                        <div id="gameNotice" class="game-notice"></div>
-                    </div>
-                </div>
-            </section>
+  <main class="main-content">
+    <div class="layout">
+      <section id="game" class="game-shell">
+        <div class="game-topline">
+          <div>
+            <span class="label">ROOM CODE</span>
+            <div class="room-line">
+              <strong id="roomCodeLabel">------</strong>
+            </div>
+          </div>
+          <button type="button" id="leaveBtn" class="btn btn-ghost-sm">Leave Game</button>
         </div>
-    </main>
 
-    <dialog id="promotionDialog" class="promotion-dialog">
-        <h3>Promote Pawn</h3>
-        <div class="promotion-options">
-            <button type="button" class="promo-piece" value="q">♛</button>
-            <button type="button" class="promo-piece" value="r">♜</button>
-            <button type="button" class="promo-piece" value="b">♝</button>
-            <button type="button" class="promo-piece" value="n">♞</button>
+        <div class="game-grid">
+          <div class="board-panel">
+            <div class="player-strip">
+              <div class="avatar">♝</div>
+              <div class="player-info">
+                <strong id="opponentName">Waiting for opponent</strong>
+                <span id="opponentCaption">Share room code</span>
+              </div>
+              <div id="opponentClock" class="clock">10:00</div>
+            </div>
+            <div class="board-frame">
+              <div id="board" class="board"></div>
+            </div>
+            <div class="player-strip self-strip">
+              <div class="avatar self-avatar">♙</div>
+              <div class="player-info">
+                <strong id="selfName">You</strong>
+                <span id="selfCaption">Playing White</span>
+              </div>
+              <div id="selfClock" class="clock">10:00</div>
+            </div>
+            <div class="board-footer">
+              <span id="turnIndicator"><i class="turn-dot"></i> Waiting</span>
+              <button type="button" id="flipBtn" class="btn btn-ghost-sm">Flip Board</button>
+            </div>
+          </div>
+
+          <div class="side-panel">
+            <!-- Chat Panel -->
+            <div class="panel chat-panel">
+              <div class="panel-head">
+                <span class="label">GAME CHAT</span>
+              </div>
+              <div id="chatMessages" class="chat-messages"></div>
+              <form id="chatForm" class="chat-form">
+                <input type="text" id="chatInput" class="text-input" placeholder="Type a message..." autocomplete="off" maxlength="256">
+                <button type="submit" id="chatSendBtn" class="btn btn-primary">Send</button>
+              </form>
+            </div>
+
+            <!-- Status Panel -->
+            <div class="panel status-panel">
+              <div class="panel-head">
+                <span class="label">STATUS</span>
+                <span id="statusBadge" class="status-badge">WAITING</span>
+              </div>
+              <h3 id="statusTitle">Waiting for opponent</h3>
+              <p id="statusDescription">Share the room code to invite them.</p>
+              <div class="invite-box">
+                <span>INVITE CODE</span>
+                <div>
+                  <strong id="inviteCode">------</strong>
+                  <button type="button" id="copyInviteBtn" class="btn btn-ghost-sm">Copy</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Move History Panel -->
+            <div class="panel moves-panel">
+              <div class="panel-head">
+                <h3>Move History</h3>
+                <span id="moveCount">0 moves</span>
+              </div>
+              <div id="moveList" class="move-list">
+                <div class="empty-moves">Your opening move will appear here.</div>
+              </div>
+            </div>
+
+            <!-- Captured Pieces Panel -->
+            <div class="panel captured-panel">
+              <span class="label">CAPTURED PIECES</span>
+              <div class="captured-row">
+                <span>By You:</span>
+                <div id="capturedByYou" class="captured-pieces">—</div>
+              </div>
+              <div class="captured-row">
+                <span>By Opponent:</span>
+                <div id="capturedByOpponent" class="captured-pieces">—</div>
+              </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="action-row">
+              <button type="button" id="drawBtn" class="btn btn-secondary" disabled>Offer draw</button>
+              <button type="button" id="resignBtn" class="btn btn-danger" disabled>Resign</button>
+            </div>
+            <button type="button" id="rematchBtn" class="btn btn-primary rematch-btn hidden">↻ Request rematch</button>
+            <div id="gameNotice" class="game-notice"></div>
+          </div>
         </div>
-        <button type="button" class="btn btn-secondary cancel-promo">Cancel</button>
-    </dialog>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="promotionDialog" class="promotion-dialog">
+    <h3>Promote Pawn</h3>
+    <div class="promotion-options">
+      <button type="button" class="promo-piece" value="q">♛</button>
+      <button type="button" class="promo-piece" value="r">♜</button>
+      <button type="button" class="promo-piece" value="b">♝</button>
+      <button type="button" class="promo-piece" value="n">♞</button>
+    </div>
+    <button type="button" class="btn btn-secondary cancel-promo">Cancel</button>
+  </dialog>
 
 
 
 
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const path = window.location.pathname;
-            const hash = window.location.hash.replace('#', '');
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const path = window.location.pathname;
+      const hash = window.location.hash.replace('#', '');
 
-            // Remove active from all items first
+      // Remove active from all items first
+      document.querySelectorAll('.sidebar .nav-item').forEach(el => el.classList.remove('active'));
+
+      // Determine which one should be active
+      let activeId = 'nav-home'; // Default
+
+      if (path.includes('game.html')) {
+        activeId = 'nav-play';
+      } else if (path.includes('history.html')) {
+        if (hash === 'archived') activeId = 'nav-archived';
+        else if (hash === 'live') activeId = 'nav-live';
+        else activeId = 'nav-history'; // Default history tab
+      } else if (path === '/' || path.includes('index.html')) {
+        activeId = 'nav-home';
+      } else if (path.includes('replay.html') || path.includes('watch.html')) {
+        activeId = 'nav-history'; // Replays belong to history
+      }
+
+      // Apply active class
+      const activeEl = document.getElementById(activeId);
+      if (activeEl) activeEl.classList.add('active');
+
+      // If on history page, listen for tab clicks to update sidebar
+      if (path.includes('history.html')) {
+        document.querySelectorAll('.tab').forEach(tab => {
+          tab.addEventListener('click', () => {
+            const onclickStr = tab.getAttribute('onclick') || '';
             document.querySelectorAll('.sidebar .nav-item').forEach(el => el.classList.remove('active'));
-
-            // Determine which one should be active
-            let activeId = 'nav-home'; // Default
-
-            if (path.includes('game.html')) {
-                activeId = 'nav-play';
-            } else if (path.includes('history.html')) {
-                if (hash === 'archived') activeId = 'nav-archived';
-                else if (hash === 'live') activeId = 'nav-live';
-                else activeId = 'nav-history'; // Default history tab
-            } else if (path === '/' || path.includes('index.html')) {
-                activeId = 'nav-home';
-            } else if (path.includes('replay.html') || path.includes('watch.html')) {
-                activeId = 'nav-history'; // Replays belong to history
-            }
-
-            // Apply active class
-            const activeEl = document.getElementById(activeId);
-            if (activeEl) activeEl.classList.add('active');
-
-            // If on history page, listen for tab clicks to update sidebar
-            if (path.includes('history.html')) {
-                document.querySelectorAll('.tab').forEach(tab => {
-                    tab.addEventListener('click', () => {
-                        const onclickStr = tab.getAttribute('onclick') || '';
-                        document.querySelectorAll('.sidebar .nav-item').forEach(el => el.classList.remove('active'));
-                        if (onclickStr.includes('archived')) document.getElementById('nav-archived')?.classList.add('active');
-                        else if (onclickStr.includes('live')) document.getElementById('nav-live')?.classList.add('active');
-                        else document.getElementById('nav-history')?.classList.add('active');
-                    });
-                });
-            }
+            if (onclickStr.includes('archived')) document.getElementById('nav-archived')?.classList.add('active');
+            else if (onclickStr.includes('live')) document.getElementById('nav-live')?.classList.add('active');
+            else document.getElementById('nav-history')?.classList.add('active');
+          });
         });
-    </script>
+      }
+    });
+  </script>
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/chess.min.js"></script>
 <script src="/app.js"></script>
-<script>
-    // Close mobile sidebar when a nav item is clicked
-    document.addEventListener('DOMContentLoaded', () => {
-        const navItems = document.querySelectorAll('.sidebar .nav-item');
-        const sidebar = document.querySelector('.sidebar');
-        const overlay = document.getElementById('sidebarOverlay');
 
-        navItems.forEach(item => {
-            item.addEventListener('click', () => {
-                if (sidebar && sidebar.classList.contains('open')) {
-                    sidebar.classList.remove('open');
-                    if (overlay) overlay.classList.remove('open');
-                }
-            });
+
+
+
+
+
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const hamburgerBtn = document.querySelector('.hamburger-btn');
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.querySelector('.sidebar-overlay');
+
+    if (hamburgerBtn && sidebar && overlay) {
+      function toggleSidebar() {
+        sidebar.classList.toggle('open');
+        overlay.classList.toggle('open');
+
+        // Toggle a class on the body to track sidebar state
+        document.body.classList.toggle('sidebar-open', sidebar.classList.contains('open'));
+      }
+
+      hamburgerBtn.addEventListener('click', toggleSidebar);
+      overlay.addEventListener('click', toggleSidebar);
+
+      // Auto-close sidebar when clicking a nav link on mobile
+      const navLinks = document.querySelectorAll('.sidebar .nav-item');
+      navLinks.forEach(link => {
+        link.addEventListener('click', () => {
+          if (sidebar.classList.contains('open')) {
+            toggleSidebar();
+          }
         });
-    });
-</script>
-
-
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-    const boardEl = document.getElementById('board');
-    if (!boardEl) return;
-
-    // Block ALL multi-touch (pinch) on the board
-    boardEl.addEventListener('touchstart', (e) => {
-        if (e.touches.length > 1) e.preventDefault();
-    }, { passive: false });
-
-    boardEl.addEventListener('touchmove', (e) => {
-        if (e.touches.length > 1) e.preventDefault();
-    }, { passive: false });
-
-    // Block double-tap zoom on the board
-    let lastTouchEnd = 0;
-    boardEl.addEventListener('touchend', (e) => {
-        const now = Date.now();
-        if (now - lastTouchEnd <= 350) e.preventDefault();
-        lastTouchEnd = now;
-    }, { passive: false });
-
-    // Also block double-tap on the frame around it
-    const frame = document.querySelector('.board-frame');
-    if (frame) {
-        frame.addEventListener('touchend', (e) => {
-            const now = Date.now();
-            if (now - lastTouchEnd <= 350) e.preventDefault();
-            lastTouchEnd = now;
-        }, { passive: false });
+      });
     }
-});
+  });
 </script>
 
 </body>

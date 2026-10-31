@@ -1257,3 +1257,68 @@ html, body {
     margin-top: auto \041important;
     padding: 20px 12px 10px;
 }
+/* ========================================================================== */
+/* MOBILE & BOARD FIXES                                                       */
+/* ========================================================================== */
+
+/* 1. Force the board to be a perfect square on all screens */
+.board-frame {
+  width: 100% !important;
+  aspect-ratio: 1 / 1 !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.board {
+  display: grid !important;
+  grid-template-columns: repeat(8, 1fr) !important;
+  grid-template-rows: repeat(8, 1fr) !important;
+  width: 100% !important;
+  height: 100% !important;
+  aspect-ratio: 1 / 1 !important;
+}
+
+/* 2. Force each square to be a perfect square */
+.square {
+  aspect-ratio: 1 / 1 !important;
+  width: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* 3. Stop the zoom stuck issue */
+.board-frame, .board, .square, .board * {
+  touch-action: manipulation !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+/* 4. Fix the mobile layout so it doesn't squeeze the board */
+@media (max-width: 900px) {
+  .main-content {
+    padding: 60px 10px 20px !important; /* Less padding on mobile */
+  }
+
+  .game-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 15px !important;
+    width: 100% !important;
+  }
+
+  .board-panel {
+    width: 100% !important;
+    padding: 6px !important; /* Reduce padding inside the panel */
+  }
+
+  .side-panel {
+    width: 100% !important;
+  }
+
+  /* Keep inputs at 16px so iOS doesn't auto-zoom on the chat box */
+  input, textarea, select, .text-input {
+    font-size: 16px !important;
+  }
+}
