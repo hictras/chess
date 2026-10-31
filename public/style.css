@@ -1518,3 +1518,24 @@ html, body {
   .sidebar-overlay.open { display: block !important; }
   .main-content { margin-left: 0 !important; width: 100% !important; padding: 80px 15px 20px !important; }
 }
+
+/* ========================================== */
+/* BOARD-ONLY ZOOM LOCK                       */
+/* ========================================== */
+.board-frame,
+.board,
+.square,
+.square * {
+  touch-action: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-touch-callout: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+/* Also lock the page from pinch-zooming past the board */
+@supports (touch-action: none) {
+  html, body {
+    touch-action: pan-y !important;
+  }
+}
