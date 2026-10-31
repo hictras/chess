@@ -32,7 +32,19 @@ try {
         ended_at TEXT DEFAULT CURRENT_TIMESTAMP
       )
     `)
-      .then(() => console.log("✅ chess_games table ready"))
+      .then(async () => {
+      console.log("✅ chess_games table ready");
+      await db.execute(`
+        CREATE TABLE IF NOT EXISTS chat_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          code TEXT NOT NULL,
+          name TEXT NOT NULL,
+          message TEXT NOT NULL,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      console.log("✅ chat_messages table ready");
+    })
       .catch(err => console.log("chess_games auto-create:", err.message));
   } else {
     console.log("⚠️ No TURSO_DATABASE_URL set — history disabled");
@@ -84,7 +96,7 @@ app.get("/api/games", async (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 50, 200);
 
     const rows = await db.execute({
-      sql: "SELECT * FROM chess_games ORDER BY id DESC LIMIT ?",
+      sql: "SELECT * FROM chess_games WHERE result != 'archived' ORDER BY id DESC LIMIT ?",
       args: [limit]
     });
 
@@ -121,6 +133,20 @@ app.get("/api/games/live", (_req, res) => {
   }
 });
 
+app.get("/api/games/archived", async (req, res) => {
+  if (!db) return res.json({ games: [], note: "DB not configured" });
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const rows = await db.execute({
+      sql: "SELECT * FROM chess_games WHERE result = 'archived' ORDER BY id DESC LIMIT ?",
+      args: [limit]
+    });
+    res.json({ games: rows.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/games/:id", async (req, res) => {
   if (!db) return res.status(503).json({ error: "DB not configured" });
 
@@ -141,6 +167,38 @@ app.get("/api/games/:id", async (req, res) => {
     }
 
     res.json({ game: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+app.patch("/api/games/:id", checkAdminAuth, async (req, res) => {
+  if (!db) return res.status(503).json({ error: "DB not configured" });
+  try {
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    
+    const result = await db.execute({
+      sql: "UPDATE chess_games SET result = 'archived' WHERE id = ?",
+      args: [id]
+    });
+    res.json({ ok: true, archived: result.rowsAffected });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch("/api/games/restore/:id", checkAdminAuth, async (req, res) => {
+  if (!db) return res.status(503).json({ error: "DB not configured" });
+  try {
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const result = await db.execute({
+      sql: "UPDATE chess_games SET result = 'restored' WHERE id = ?",
+      args: [id]
+    });
+    res.json({ ok: true, restored: result.rowsAffected });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
