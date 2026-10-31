@@ -184,7 +184,7 @@
 
         function onSquareClick(square) {
             if (!state.game || !state.latestState || state.latestState.status === "checkmate" ||
-                ["stalemate", "threefold", "insufficient", "draw"].includes(state.latestState.status)) return;
+                    ["stalemate", "threefold", "insufficient", "draw"].includes(state.latestState.status)) return;
             if (state.latestState.turn !== state.color) return showNotice("It is not your turn.", true);
             const piece = state.game.get(square);
             if (state.selected && state.legalTargets.includes(square)) {
@@ -218,8 +218,8 @@
                     const pair = document.createElement("div");
                     pair.className = "move-pair";
                     pair.innerHTML = `<span class="move-no">${Math.floor(i/2)+1}.</span>
-                                     <span class="move-san">${history[i].san}</span>
-                                     <span class="move-san">${history[i+1] ? history[i+1].san : ''}</span>`;
+                                      <span class="move-san">${history[i].san}</span>
+                                      <span class="move-san">${history[i+1] ? history[i+1].san : ''}</span>`;
                     list.appendChild(pair);
                 }
                 list.scrollTop = list.scrollHeight;
