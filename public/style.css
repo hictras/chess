@@ -1257,6 +1257,75 @@ html, body {
     margin-top: auto \041important;
     padding: 20px 12px 10px;
 }
+/* ========================================== */
+/* FIX MOBILE SIDEBAR OVERLAY                 */
+/* ========================================== */
+@media (max-width: 900px) {
+  /* Force sidebar to hide to the left */
+  .sidebar {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    height: 100vh !important;
+    transform: translateX(-100%) !important;
+    transition: transform 0.3s ease !important;
+    z-index: 1000 !important;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.5) !important;
+  }
+
+  /* When 'open' class is added by JS, slide it in */
+  .sidebar.open {
+    transform: translateX(0) !important;
+  }
+
+  /* Ensure the main content takes full width */
+  .main-content {
+    margin-left: 0 !important;
+    width: 100% !important;
+  }
+}
+
+/* ========================================== */
+/* SIDEBAR SPACING FIX                        */
+/* ========================================== */
+.sidebar {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start \041important;
+    align-items: stretch;
+    gap: 5px \041important;
+    padding: 18px 12px \041important;
+}
+
+.sidebar .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 22px \041important;
+    padding: 8px 12px;
+}
+
+.sidebar .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 43px;
+    padding: 10px 12px \041important;
+    margin: 0 \041important;
+    border-radius: 9px;
+    line-height: 1.2;
+}
+
+.sidebar .nav-item svg {
+    width: 19px;
+    height: 19px;
+    flex-shrink: 0;
+}
+
+.sidebar .sidebar-footer {
+    margin-top: auto \041important;
+    padding: 20px 12px 10px;
+}
 /* ========================================================================== */
 /* MOBILE & BOARD FIXES                                                       */
 /* ========================================================================== */

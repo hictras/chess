@@ -186,5 +186,26 @@
         });
     </script>
 
+<script src="/socket.io/socket.io.js"></script>
+<script src="/chess.min.js"></script>
+<script src="/app.js"></script>
+<script>
+    // Close mobile sidebar when a nav item is clicked
+    document.addEventListener('DOMContentLoaded', () => {
+        const navItems = document.querySelectorAll('.sidebar .nav-item');
+        const sidebar = document.querySelector('.sidebar');
+        const overlay = document.getElementById('sidebarOverlay');
+
+        navItems.forEach(item => {
+            item.addEventListener('click', () => {
+                if (sidebar && sidebar.classList.contains('open')) {
+                    sidebar.classList.remove('open');
+                    if (overlay) overlay.classList.remove('open');
+                }
+            });
+        });
+    });
+</script>
+
 </body>
 </html>

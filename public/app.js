@@ -260,6 +260,7 @@
             if ($("statusBadge")) $("statusBadge").textContent = s.status.toUpperCase();
             if ($("statusTitle")) $("statusTitle").textContent = s.turn === state.color ? "Your Turn" : "Opponent's Turn";
             if ($("statusDescription")) $("statusDescription").textContent = "Waiting for a move...";
+            if ($("turnIndicator")) $("turnIndicator").innerHTML = `<i class="turn-dot"></i> ${isMyTurn ? "Your Turn" : "Opponent's Turn"}`;
 
             if ($("drawBtn")) $("drawBtn").disabled = !opponent || s.status !== "playing";
             if ($("resignBtn")) $("resignBtn").disabled = !opponent || s.status !== "playing";
@@ -412,4 +413,4 @@
     // SVG PRELOADER
     Object.values(PIECES).forEach(src => { const img = new Image(); img.src = src; });
 
-})(); 
+})();
