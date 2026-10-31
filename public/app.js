@@ -130,7 +130,7 @@
             return null;
         }
 
-function renderBoard() {
+        function renderBoard() {
             if (!state.game) return;
             const checkedKingSquare = findCheckedKingSquare(state.game);
             boardEl.innerHTML = "";
@@ -138,17 +138,9 @@ function renderBoard() {
             const ranks = state.flipped ? "12345678" : "87654321";
             const fenRows = state.game.board();
             const boardMap = {};
-
-            // Map chess.js 8x8 board array precisely (row 0 = rank 8, row 7 = rank 1)
-            fenRows.forEach((row, ri) => {
-                const rankNum = 8 - ri;
-                row.forEach((p, fi) => {
-                    if (p) {
-                        const fileChar = "abcdefgh"[fi];
-                        boardMap[fileChar + rankNum] = p;
-                    }
-                });
-            });
+            fenRows.forEach((row, ri) => row.forEach((p, fi) => {
+                if (p) boardMap["abcdefgh"[fi] + (8 - ri)] = p;
+            }));
 
             for (let r = 0; r < 8; r++) {
                 for (let f = 0; f < 8; f++) {
@@ -268,7 +260,6 @@ function renderBoard() {
             if ($("statusBadge")) $("statusBadge").textContent = s.status.toUpperCase();
             if ($("statusTitle")) $("statusTitle").textContent = s.turn === state.color ? "Your Turn" : "Opponent's Turn";
             if ($("statusDescription")) $("statusDescription").textContent = "Waiting for a move...";
-            if ($("turnIndicator")) $("turnIndicator").innerHTML = `<i class="turn-dot"></i> ${isMyTurn ? "Your Turn" : "Opponent's Turn"}`;
 
             if ($("drawBtn")) $("drawBtn").disabled = !opponent || s.status !== "playing";
             if ($("resignBtn")) $("resignBtn").disabled = !opponent || s.status !== "playing";
@@ -421,4 +412,4 @@ function renderBoard() {
     // SVG PRELOADER
     Object.values(PIECES).forEach(src => { const img = new Image(); img.src = src; });
 
-})();
+})(); 
