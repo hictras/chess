@@ -1420,3 +1420,27 @@ html, body {
 input, textarea, select {
     font-size: 16px !important;
 }
+
+/* ========================================== */
+/* BULLETPROOF MOBILE ZOOM PREVENTION         */
+/* ========================================== */
+
+/* Force input font size to 16px to stop iOS auto-zoom */
+input, textarea, select, .text-input, .chat-form .text-input, #chatInput {
+    font-size: 16px !important;
+}
+
+/* Ensure no horizontal scrolling/overflow */
+html, body {
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
+    touch-action: pan-y !important; /* Only allow vertical scrolling */
+}
+
+/* Prevent zoom on the board and all its children */
+.board-frame, .board, .square, .board * {
+    touch-action: manipulation !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-touch-callout: none !important;
+}
