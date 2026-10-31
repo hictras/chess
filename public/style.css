@@ -1405,3 +1405,18 @@ html, body {
 .square.dark .coord {
     color: #eeeed2 !important; /* Light cream for dark squares */
 }
+
+/* ========================================== */
+/* DISABLE MOBILE ZOOM ON BOARD               */
+/* ========================================== */
+.board-frame, .board, .square {
+    touch-action: manipulation !important; /* Prevents pinch and double-tap zoom */
+    -webkit-user-select: none !important;  /* Prevents text selection */
+    user-select: none !important;
+    -webkit-touch-callout: none !important;
+}
+
+/* Prevent iOS from zooming in on input fields */
+input, textarea, select {
+    font-size: 16px !important;
+}
