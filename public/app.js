@@ -185,6 +185,7 @@
                 if (!sq) return;
                 const piece = boardMap[sq];
 
+                // 1. Toggle CSS classes safely (this doesn't touch the pieces)
                 btn.classList.toggle("selected", state.selected === sq);
                 btn.classList.toggle(
                     "last-move",
@@ -192,18 +193,44 @@
                 );
                 btn.classList.toggle("checked-king", sq === state.checkedKingSquare);
 
-                btn.querySelectorAll(".piece, .dot, .capture-ring").forEach(n => n.remove());
+                // 2. Handle the piece image ONLY if it actually changed
+                const existingPiece = btn.querySelector(".piece");
+                const currentKey = existingPiece ? existingPiece.dataset.key : null;
+                const desiredKey = piece ? (piece.color + piece.type) : null;
 
-                if (piece) {
-                    const span = document.createElement("span");
-                    span.className = "piece " + (piece.color === "w" ? "white" : "black");
-                    span.innerHTML = `<img src="${PIECES[piece.color + piece.type]}" alt="" style="width:100%;height:100%;object-fit:contain;pointer-events:none" />`;
-                    btn.insertBefore(span, btn.firstChild);
+                if (currentKey !== desiredKey) {
+                    if (existingPiece) existingPiece.remove();
+                    if (piece) {
+                        const span = document.createElement("span");
+                        span.className = "piece " + (piece.color === "w" ? "white" : "black");
+                        span.dataset.key = desiredKey; 
+                        span.innerHTML = `<img src="${PIECES[piece.color + piece.type]}" alt="" style="width:100%;height:100%;object-fit:contain;pointer-events:none" />`;
+                        
+                        // Insert before the coordinate spans (if any)
+                        const coord = btn.querySelector(".coord");
+                        if (coord) btn.insertBefore(span, coord);
+                        else btn.appendChild(span);
+                    }
                 }
-                if (state.legalTargets.includes(sq)) {
-                    const mark = document.createElement("span");
-                    mark.className = piece ? "capture-ring" : "dot";
-                    btn.appendChild(mark);
+
+                // 3. Handle the legal move dots/rings safely
+                let dot = btn.querySelector(".dot");
+                let ring = btn.querySelector(".capture-ring");
+                const isTarget = state.legalTargets.includes(sq);
+
+                if (isTarget && piece && !ring) {
+                    if (dot) dot.remove();
+                    const r = document.createElement("span");
+                    r.className = "capture-ring";
+                    btn.appendChild(r);
+                } else if (isTarget && !piece && !dot) {
+                    if (ring) ring.remove();
+                    const d = document.createElement("span");
+                    d.className = "dot";
+                    btn.appendChild(d);
+                } else if (!isTarget) {
+                    if (dot) dot.remove();
+                    if (ring) ring.remove();
                 }
             });
         }
