@@ -6,12 +6,142 @@
     <title>Chess Online</title>
     <link rel="stylesheet" href="/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+  @media (max-width: 900px) {
+    /* Fix the hamburger button */
+    .hamburger-btn {
+      display: flex !important;
+      position: fixed !important;
+      top: 15px !important;
+      left: 15px !important;
+      z-index: 1001 !important;
+      background: rgba(20, 26, 38, 0.9) !important;
+      border: 1px solid rgba(255,255,255,0.1) !important;
+      color: #fff !important;
+      width: 44px !important;
+      height: 44px !important;
+      border-radius: 12px !important;
+      align-items: center !important;
+      justify-content: center !important;
+    }
+
+    /* Hide the sidebar off-screen */
+    .sidebar {
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      height: 100vh !important;
+      width: 260px !important;
+      transform: translateX(-100%) !important;
+      transition: transform 0.3s ease !important;
+      z-index: 1000 !important;
+      margin: 0 !important;
+    }
+
+    /* Slide it in */
+    .sidebar.open {
+      transform: translateX(0) !important;
+    }
+
+    /* The dark overlay */
+    .sidebar-overlay {
+      display: none;
+      position: fixed !important;
+      inset: 0 !important;
+      background: rgba(0,0,0,0.7) !important;
+      z-index: 999 !important;
+    }
+    .sidebar-overlay.open {
+      display: block !important;
+    }
+
+    /* Main content fixes */
+    .main-content {
+      margin-left: 0 !important;
+      width: 100% !important;
+      padding: 80px 15px 20px !important;
+    }
+  }
+</style>
+
+
+<style>
+  /* FORCE HAMBURGER BUTTON POSITION */
+  .hamburger-btn {
+    display: none;
+    position: fixed !important;
+    top: 15px !important;
+    left: 15px !important;
+    z-index: 99999 !important;
+    background: rgba(20, 26, 38, 0.9) !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    color: #fff !important;
+    width: 44px !important;
+    height: 44px !important;
+    border-radius: 12px !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer !important;
+  }
+
+  @media (max-width: 900px) {
+    .hamburger-btn {
+      display: flex !important;
+    }
+    .sidebar {
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      height: 100vh !important;
+      transform: translateX(-100%) !important;
+      transition: transform 0.3s ease !important;
+      z-index: 1000 !important;
+    }
+    .sidebar.open {
+      transform: translateX(0) !important;
+    }
+    .sidebar-overlay {
+      display: none;
+      position: fixed !important;
+      inset: 0 !important;
+      background: rgba(0,0,0,0.7) !important;
+      z-index: 999 !important;
+    }
+    .sidebar-overlay.open {
+      display: block !important;
+    }
+    .main-content {
+      margin-left: 0 !important;
+      width: 100% !important;
+      padding: 80px 15px 20px !important;
+    }
+  }
+</style>
+
 </head>
+
 <body>
-    <button class="hamburger-btn" id="hamburgerBtn" aria-label="Menu">
-        <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-    </button>
-    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+  <button class="hamburger-btn" id="hamburgerBtn" aria-label="Menu">
+    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+  </button>
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+
+
+
+  
+  
+
+    
+    
+    
+    
+    
+
+    
+    
     <aside class="sidebar">
         <a href="/" class="brand"><span class="brand-mark">♞</span><span class="brand-name">CHESS</span></a>
         <a href="/" class="nav-item active"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg> Home</a>
@@ -93,38 +223,41 @@
     </script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="/app.js"></script>
+
+
+
+
+
+
+
 <script>
-    document.addEventListener('DOMContentLoaded', () => {
-        const btn = document.getElementById('hamburgerBtn');
-        const sidebar = document.querySelector('.sidebar');
-        const overlay = document.getElementById('sidebarOverlay');
-        if (btn && sidebar && overlay) {
-            btn.addEventListener('click', () => {
-                sidebar.classList.toggle('open');
-                overlay.classList.toggle('open');
-            });
-            overlay.addEventListener('click', () => {
-                sidebar.classList.remove('open');
-                overlay.classList.remove('open');
-            });
-        }
-    });
-    </script>
-<script>
-  // Close mobile sidebar when a nav item is clicked
   document.addEventListener('DOMContentLoaded', () => {
-    const navItems = document.querySelectorAll('.sidebar .nav-item');
+    const hamburgerBtn = document.querySelector('.hamburger-btn');
     const sidebar = document.querySelector('.sidebar');
-    const overlay = document.getElementById('sidebarOverlay');
-    
-    navItems.forEach(item => {
-      item.addEventListener('click', () => {
-        if (sidebar && sidebar.classList.contains('open')) {
-          sidebar.classList.remove('open');
-          if (overlay) overlay.classList.remove('open');
-        }
+    const overlay = document.querySelector('.sidebar-overlay');
+
+    if (hamburgerBtn && sidebar && overlay) {
+      function toggleSidebar() {
+        sidebar.classList.toggle('open');
+        overlay.classList.toggle('open');
+        
+        // Toggle a class on the body to track sidebar state
+        document.body.classList.toggle('sidebar-open', sidebar.classList.contains('open'));
+      }
+
+      hamburgerBtn.addEventListener('click', toggleSidebar);
+      overlay.addEventListener('click', toggleSidebar);
+
+      // Auto-close sidebar when clicking a nav link on mobile
+      const navLinks = document.querySelectorAll('.sidebar .nav-item');
+      navLinks.forEach(link => {
+        link.addEventListener('click', () => {
+          if (sidebar.classList.contains('open')) {
+            toggleSidebar();
+          }
+        });
       });
-    });
+    }
   });
 </script>
 
