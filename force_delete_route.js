@@ -11,42 +11,65 @@ module.exports = function(app, io) {
         }
 
         const code = req.params.code.toUpperCase();
+        const lowerCode = code.toLowerCase();
         
         try {
-            // 1. Delete from memory
-            if (typeof games !== 'undefined') delete games[code];
-            if (typeof rooms !== 'undefined') delete rooms[code];
-            if (typeof activeRooms !== 'undefined') delete activeRooms[code];
+            // 1. Clear from ALL possible global in-memory maps/objects
+            const globalMaps = ['games', 'rooms', 'activeRooms', 'activeGames', 'liveGames', 'roomsMap'];
+            globalMaps.forEach(mapName => {
+                if (global[mapName] && typeof global[mapName].delete === 'function') {
+                    global[mapName].delete(code);
+                    global[mapName].delete(lowerCode);
+                }
+                if (global[mapName] && typeof global[mapName] === 'object') {
+                    delete global[mapName][code];
+                    delete global[mapName][lowerCode];
+                }
+            });
 
-            // 2. Disconnect sockets
-            const activeGame = typeof games !== 'undefined' ? games[code] : (typeof rooms !== 'undefined' ? rooms[code] : null);
-            if (activeGame && activeGame.players) {
-                Object.values(activeGame.players).forEach(p => {
-                    if (p && p.socketId) {
-                        io.to(p.socketId).emit("gameError", "Game was forcefully finished by admin.");
-                        const socket = io.sockets.sockets.get(p.socketId);
+            // Also check app-level settings if attached
+            const appMaps = ['activeGames', 'rooms', 'games'];
+            appMaps.forEach(mapName => {
+                const m = app.get(mapName);
+                if (m) {
+                    if (typeof m.delete === 'function') {
+                        m.delete(code);
+                        m.delete(lowerCode);
+                    } else if (typeof m === 'object') {
+                        delete m[code];
+                        delete m[lowerCode];
+                    }
+                }
+            });
+
+            // 2. Disconnect any active sockets in this room
+            if (io && io.sockets && io.sockets.adapter && io.sockets.adapter.rooms) {
+                const room = io.sockets.adapter.rooms.get(code) || io.sockets.adapter.rooms.get(lowerCode);
+                if (room) {
+                    for (const socketId of room) {
+                        const socket = io.sockets.sockets.get(socketId);
                         if (socket) {
+                            socket.emit("gameError", "Game was forcefully finished by admin.");
                             socket.leave(code);
+                            socket.leave(lowerCode);
                             socket.disconnect(true);
                         }
                     }
-                });
+                }
             }
 
-            // 3. CRITICAL: Delete or update in Turso Database
-            // This ensures it vanishes from the live list.
+            // 3. Update Turso Database (try both uppercase and lowercase code formats)
             if (typeof db !== 'undefined' && db) {
-                // Update the status so it no longer shows as 'live'
                 await db.execute({
-                    sql: "UPDATE games SET status = 'finished', result = 'aborted' WHERE code = ?",
-                    args: [code]
+                    sql: "UPDATE games SET status = 'finished', result = 'aborted' WHERE code = ? OR code = ?",
+                    args: [code, lowerCode]
                 });
             }
 
-            res.json({ success: true, message: 'Game force finished' });
+            return res.json({ success: true, message: 'Game force finished and cleaned from memory/DB' });
         } catch (e) {
             console.error("Delete error:", e);
-            res.status(500).json({ error: e.message });
+            return res.status(500).json({ error: e.message });
         }
     });
 };
