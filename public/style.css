@@ -1539,3 +1539,36 @@ html, body {
     touch-action: pan-y !important;
   }
 }
+
+/* ========================================== */
+/* HARD BOARD ZOOM LOCK (mobile)              */
+/* ========================================== */
+@media (max-width: 900px) {
+  .board-frame,
+  .board {
+    touch-action: pan-y !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+  }
+  .square {
+    touch-action: pan-y !important;
+  }
+  .board * {
+    -webkit-touch-callout: none !important;
+  }
+}
+html, body {
+  width: 100% !important;
+  max-width: 100vw !important;
+  overflow-x: hidden !important;
+}
+
+.main-content,
+.game-shell,
+.game-grid,
+.board-panel,
+.board-frame,
+.board {
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}

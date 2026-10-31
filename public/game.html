@@ -208,24 +208,39 @@
 </script>
 
 
-    <script>
-        // Prevent double-tap zoom on the chessboard for mobile devices
-        document.addEventListener('DOMContentLoaded', () => {
-            const boardEl = document.getElementById('board');
-            if (!boardEl) return;
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const boardEl = document.getElementById('board');
+    if (!boardEl) return;
 
-            let lastTouchEnd = 0;
+    // Block ALL multi-touch (pinch) on the board
+    boardEl.addEventListener('touchstart', (e) => {
+        if (e.touches.length > 1) e.preventDefault();
+    }, { passive: false });
 
-            boardEl.addEventListener('touchend', (event) => {
-                const now = (new Date()).getTime();
-                // If the user taps twice within 300ms, prevent the default browser zoom
-                if (now - lastTouchEnd <= 300) {
-                    event.preventDefault();
-                }
-                lastTouchEnd = now;
-            }, false);
-        });
-    </script>
+    boardEl.addEventListener('touchmove', (e) => {
+        if (e.touches.length > 1) e.preventDefault();
+    }, { passive: false });
+
+    // Block double-tap zoom on the board
+    let lastTouchEnd = 0;
+    boardEl.addEventListener('touchend', (e) => {
+        const now = Date.now();
+        if (now - lastTouchEnd <= 350) e.preventDefault();
+        lastTouchEnd = now;
+    }, { passive: false });
+
+    // Also block double-tap on the frame around it
+    const frame = document.querySelector('.board-frame');
+    if (frame) {
+        frame.addEventListener('touchend', (e) => {
+            const now = Date.now();
+            if (now - lastTouchEnd <= 350) e.preventDefault();
+            lastTouchEnd = now;
+        }, { passive: false });
+    }
+});
+</script>
 
 </body>
 </html>
