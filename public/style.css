@@ -1222,17 +1222,17 @@ html, body {
 .sidebar {
     display: flex;
     flex-direction: column;
-    justify-content: flex-start \041important;
+    justify-content: flex-start !importantimportant;
     align-items: stretch;
-    gap: 5px \041important;
-    padding: 18px 12px \041important;
+    gap: 5px !importantimportant;
+    padding: 18px 12px !importantimportant;
 }
 
 .sidebar .brand {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin: 0 0 22px \041important;
+    margin: 0 0 22px !importantimportant;
     padding: 8px 12px;
 }
 
@@ -1241,8 +1241,8 @@ html, body {
     align-items: center;
     gap: 12px;
     min-height: 43px;
-    padding: 10px 12px \041important;
-    margin: 0 \041important;
+    padding: 10px 12px !importantimportant;
+    margin: 0 !importantimportant;
     border-radius: 9px;
     line-height: 1.2;
 }
@@ -1254,7 +1254,7 @@ html, body {
 }
 
 .sidebar .sidebar-footer {
-    margin-top: auto \041important;
+    margin-top: auto !importantimportant;
     padding: 20px 12px 10px;
 }
 /* ========================================== */
@@ -1291,17 +1291,17 @@ html, body {
 .sidebar {
     display: flex;
     flex-direction: column;
-    justify-content: flex-start \041important;
+    justify-content: flex-start !importantimportant;
     align-items: stretch;
-    gap: 5px \041important;
-    padding: 18px 12px \041important;
+    gap: 5px !importantimportant;
+    padding: 18px 12px !importantimportant;
 }
 
 .sidebar .brand {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin: 0 0 22px \041important;
+    margin: 0 0 22px !importantimportant;
     padding: 8px 12px;
 }
 
@@ -1310,8 +1310,8 @@ html, body {
     align-items: center;
     gap: 12px;
     min-height: 43px;
-    padding: 10px 12px \041important;
-    margin: 0 \041important;
+    padding: 10px 12px !importantimportant;
+    margin: 0 !importantimportant;
     border-radius: 9px;
     line-height: 1.2;
 }
@@ -1323,7 +1323,7 @@ html, body {
 }
 
 .sidebar .sidebar-footer {
-    margin-top: auto \041important;
+    margin-top: auto !importantimportant;
     padding: 20px 12px 10px;
 }
 /* ========================================================================== */
@@ -1620,4 +1620,235 @@ html, body {
     line-height: 1;
     pointer-events: none;
     z-index: 4;
+}
+/* ========================================== */
+/* UNIFIED MOBILE LAYOUT (MATCHES HISTORY)    */
+/* ========================================== */
+@media (max-width: 900px) {
+  body { 
+    flex-direction: column !important; 
+    overflow-y: auto !important; 
+  }
+  
+  /* The shared sliding sidebar */
+  .sidebar { 
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    height: 100vh !important;
+    width: 260px !important;
+    transform: translateX(-100%) !important;
+    transition: transform 0.3s ease !important;
+    z-index: 1000 !important;
+    background: #0e121b !important;
+    border-right: 1px solid rgba(255,255,255,0.05) !important;
+    padding: 24px 12px !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  .sidebar.open { transform: translateX(0) !important; }
+  
+  .sidebar .brand { padding: 0 12px 32px !important; margin: 0 !important; }
+  .sidebar .nav-item { display: flex !important; }
+
+  /* Hamburger button */
+  .hamburger-btn {
+    display: flex !important;
+    position: fixed !important;
+    top: 15px !important;
+    left: 15px !important;
+    z-index: 1001 !important;
+    background: rgba(20, 26, 38, 0.9) !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    color: #fff !important;
+    width: 44px !important;
+    height: 44px !important;
+    border-radius: 12px !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  /* Dark overlay */
+  .sidebar-overlay {
+    display: none !important;
+    position: fixed !important;
+    inset: 0 !important;
+    background: rgba(0,0,0,0.7) !important;
+    z-index: 999 !important;
+  }
+  .sidebar-overlay.open { display: block !important; }
+
+  /* Main content spacing */
+  .main-content {
+    margin-left: 0 !important;
+    padding: 70px 15px 20px !important;
+    width: 100% !important;
+    min-height: 100vh !important;
+    overflow-y: visible !important;
+  }
+
+  /* Center the header title like history.html */
+  .page-header {
+    flex-direction: column !important;
+    align-items: center !important;
+    text-align: center !important;
+    gap: 16px !important;
+    margin-bottom: 20px !important;
+  }
+  .page-header > div:first-child,
+  .page-header .user-profile { display: none !important; }
+  .header-title h1 { font-size: 32px !important; }
+}
+
+/* =========================================
+   LIVE & ARCHIVED TABS — MOBILE DESIGN
+   (Matches #history design)
+========================================= */
+
+@media (max-width: 700px) {
+
+    /* --- #live TAB --- */
+    #live {
+        width: 100%;
+        overflow: visible;
+    }
+    #live .table-head { display: none !important; }
+    #live .game-card {
+        display: block !important;
+        width: 100%;
+        margin: 0 0 13px;
+        padding: 0;
+        overflow: visible;
+        background: linear-gradient(145deg, #111d27, #0d1821);
+        border: 1px solid #263945;
+        border-radius: 15px;
+        box-shadow: 0 5px 16px rgba(0,0,0,.16);
+    }
+    #live .game-row {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr;
+        gap: 13px 12px;
+        padding: 15px;
+        align-items: center;
+    }
+    #live .game-row .code {
+        grid-column: 1;
+        grid-row: 1;
+        font-size: 14px;
+        font-weight: 850;
+        color: #42e69b;
+        letter-spacing: .7px;
+    }
+    /* Hide the eye icon cell on mobile (looks cleaner) */
+    #live .game-row > span:nth-child(6) { display: none; }
+    
+    #live .game-row .actions {
+        grid-column: 2;
+        grid-row: 1;
+        justify-self: end;
+        display: flex;
+        justify-content: flex-end;
+    }
+    #live .game-row > span:not(.code) {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+        font-size: 13px;
+        color: #e5edf2;
+        overflow-wrap: anywhere;
+    }
+    #live .game-row > span:nth-child(2)::before { content: "WHITE"; color: #8298a8; font-size: 9px; font-weight: 800; letter-spacing: 1px; }
+    #live .game-row > span:nth-child(3)::before { content: "BLACK"; color: #8298a8; font-size: 9px; font-weight: 800; letter-spacing: 1px; }
+    #live .game-row > span:nth-child(4)::before { content: "TURN"; color: #8298a8; font-size: 9px; font-weight: 800; letter-spacing: 1px; }
+    #live .game-row > span:nth-child(5)::before { content: "MOVES"; color: #8298a8; font-size: 9px; font-weight: 800; letter-spacing: 1px; }
+
+    #live .icon-btn { width: 36px; height: 36px; border-radius: 10px; }
+
+
+    /* --- #archived TAB --- */
+    #archived {
+        width: 100%;
+        overflow: visible;
+    }
+    #archived .table-head { display: none !important; }
+    #archived .game-card {
+        display: block !important;
+        width: 100%;
+        margin: 0 0 13px;
+        padding: 0;
+        overflow: visible;
+        background: linear-gradient(145deg, #111d27, #0d1821);
+        border: 1px solid #263945;
+        border-radius: 15px;
+        box-shadow: 0 5px 16px rgba(0,0,0,.16);
+    }
+    #archived .game-row {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr;
+        gap: 13px 12px;
+        padding: 15px;
+        align-items: center;
+    }
+    #archived .game-row .code {
+        grid-column: 1;
+        grid-row: 1;
+        font-size: 14px;
+        font-weight: 850;
+        color: #42e69b;
+        letter-spacing: .7px;
+    }
+    #archived .game-row .actions {
+        grid-column: 2;
+        grid-row: 1;
+        justify-self: end;
+        display: flex;
+        justify-content: flex-end;
+    }
+    #archived .game-row > span:not(.code) {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+        font-size: 13px;
+        color: #e5edf2;
+        overflow-wrap: anywhere;
+    }
+    #archived .game-row > span:nth-child(2)::before { content: "WHITE"; color: #8298a8; font-size: 9px; font-weight: 800; letter-spacing: 1px; }
+    #archived .game-row > span:nth-child(3)::before { content: "BLACK"; color: #8298a8; font-size: 9px; font-weight: 800; letter-spacing: 1px; }
+    #archived .game-row > span:nth-child(4)::before { content: "WINNER"; color: #8298a8; font-size: 9px; font-weight: 800; letter-spacing: 1px; }
+    #archived .game-row > span:nth-child(5)::before { content: "DURATION"; color: #8298a8; font-size: 9px; font-weight: 800; letter-spacing: 1px; }
+    #archived .game-row > span:nth-child(6) {
+        grid-column: 1 / -1;
+        border-top: 1px solid #23343f;
+        padding-top: 10px;
+        color: #91a9bb;
+        font-size: 11px;
+    }
+    #archived .game-row > span:nth-child(6)::before { content: "PLAYED ON"; color: #8298a8; font-size: 9px; font-weight: 800; letter-spacing: 1px; }
+
+    #archived .winner.white { color: #48e8a0 !important; font-weight: 750; }
+    #archived .winner.black { color: #65b9ff !important; font-weight: 750; }
+    #archived .winner.draw { color: #a9b6c2 !important; }
+
+    #archived .sub-row {
+        display: flex !important;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+        padding: 12px 15px 14px;
+        border-top: 1px solid #263945;
+        background: rgba(5, 14, 20, .3);
+        border-radius: 0 0 15px 15px;
+    }
+    #archived .moves-info { color: #9db0bd; font-size: 12px; }
+    #archived .action-btns { display: grid !important; grid-template-columns: 1fr; gap: 9px; width: 100%; }
+    #archived .action-btns .btn-replay,
+    #archived .action-btns .btn-moves {
+        display: flex; align-items: center; justify-content: center; width: 100%; min-height: 40px; padding: 8px 5px; border-radius: 10px; font-size: 12px; white-space: nowrap; text-align: center;
+    }
+    #archived .moves-detail {
+        padding: 12px 15px; line-height: 1.9; font-size: 12px; overflow-wrap: anywhere; word-break: normal; border-top: 1px solid #263945; color: #b9cbd5;
+    }
+    #archived .moves-detail.hidden { display: none !important; }
 }
