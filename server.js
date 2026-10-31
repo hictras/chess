@@ -800,6 +800,11 @@ setInterval(() => {
   }
 }, 1000);
 
+const attachForceDelete = require("./force_delete_route");
+attachForceDelete(app, io);
+
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Chess Online listening on ${PORT}`);
 });
+
+

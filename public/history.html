@@ -511,7 +511,7 @@
 
     <!-- Live Games -->
     <div id="live">
-      <div class="table-head"><span>Code</span><span>White</span><span>Black</span><span>Turn</span><span>Moves</span><span style="text-align:right;">Watch</span><span></span></div>
+      <div class="table-head"><span>Code</span><span>White</span><span>Black</span><span>Turn</span><span>Moves</span><span style="text-align:right;">Watch</span><span style="text-align:right; padding-right: 15px;">Action</span></div>
       <div id="liveBody"><div class="empty">Loading...</div></div>
     </div>
 
@@ -601,7 +601,7 @@
     // ============ RENDERERS ============
     async function loadLive(){
       try{
-        const res = await fetch('/api/games/live'); const d = await res.json();
+        const res = await fetch('/api/games/live?_t=' + Date.now()); const d = await res.json();
         const b = document.getElementById('liveBody');
         if(!d.live || d.live.length === 0) { b.innerHTML = '<div class="empty">No live games right now.</div>'; return; }
         b.innerHTML = d.live.map(g => `
@@ -613,7 +613,11 @@
               <span><span style="color:#22c55e;background:rgba(34,197,94,.1);padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;letter-spacing:.5px;">${g.turn==='w'?'WHITE':'BLACK'}</span></span>
               <span>${g.moves} moves</span>
               <span style="color:#22c55e;font-weight:600;text-align:right;">👁 Watch</span>
-              <span></span>
+              <span style="text-align:right; padding-right: 15px;">
+                <button onclick="event.stopPropagation(); forceDeleteLive('${g.code}')" class="icon-btn delete" title="Force Finish Game" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.1); width: 32px; height: 32px;">
+                  <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
+              </span>
             </div>
           </div>`).join('');
       } catch(e) { document.getElementById('liveBody').innerHTML = '<div class="empty">Failed to load.</div>'; }
@@ -974,6 +978,43 @@
     });
   });
 </script>
+
+
+    
+
+
+    
+
+
+    <script>
+    async function forceDeleteLive(code) {
+        const pass = await cModal({ 
+            title: "Admin Required", 
+            message: "Enter password to forcefully finish this stuck game:", 
+            isPassword: true, 
+            danger: true, 
+            okText: "Finish Game" 
+        });
+        if (!pass) return;
+        
+        try {
+            const res = await fetch('/api/games/live/' + code, { 
+                method: 'DELETE',
+                headers: { "Authorization": "Basic " + btoa("admin:" + pass) }
+            });
+            
+            if (res.ok) {
+                // FORCE IMMEDIATE REFRESH
+                loadLive(); 
+            } else {
+                const errorText = await res.text();
+                await cModal({ title: "Error", message: "Failed: " + (errorText || res.status), confirmOnly: true });
+            }
+        } catch(e) {
+            await cModal({ title: "Error", message: "Connection error", confirmOnly: true });
+        }
+    }
+    </script>
 
 </body>
 </html>
