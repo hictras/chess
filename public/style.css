@@ -1391,3 +1391,233 @@ html, body {
     font-size: 16px !important;
   }
 }
+/* ensure last-move highlight always wins */
+.board .square.last-move { background-color: #f6f669 !important; }
+
+/* Light border around last-move squares */
+.board .square.last-move {
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85),
+                inset 0 0 0 3px rgba(0, 0, 0, 0.15) !important;
+    z-index: 1;
+}
+
+/* Subtle light inner border on last-move squares */
+.board .square.last-move {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7) !important;
+    z-index: 1;
+}
+
+/* ========================================== */
+/* FIXED BOARD COORDINATES (FILES & RANKS)    */
+/* ========================================== */
+.board-frame {
+    position: relative; /* needed for absolute positioning of coords */
+}
+
+.board-coords {
+    position: absolute;
+    inset: 0;
+    pointer-events: none; /* clicks pass through to pieces */
+    z-index: 10;
+    font-family: monospace;
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.board-coords .coord {
+    position: absolute;
+    color: rgba(0, 0, 0, 0.6); /* dark for light squares */
+    text-shadow: 0 0 2px rgba(255,255,255,0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 12.5%;
+    height: 12.5%;
+}
+
+/* File letters span the whole column, aligned to bottom */
+.board-coords .coord.file {
+    height: 20px;
+    width: 12.5%;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    padding-bottom: 2px;
+}
+
+/* Rank numbers span the whole row, aligned to left */
+.board-coords .coord.rank {
+    width: 20px;
+    height: 12.5%;
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    padding-left: 2px;
+}
+
+/* Make coordinates white on dark squares for visibility */
+.board-coords .coord[style*="top"]:nth-child(even) { color: #fff; text-shadow: 0 0 2px rgba(0,0,0,0.8); }
+
+/* ========================================== */
+/* PERFECT BOARD COORDINATES                  */
+/* ========================================== */
+
+/* Base style for the coordinates */
+.square::before,
+.square::after {
+    position: absolute;
+    font-family: monospace;
+    font-size: 11px;
+    font-weight: 800;
+    pointer-events: none; /* so they don't block clicks */
+    z-index: 2;
+}
+
+/* Rank (Numbers 1-8) on the left side */
+.square::before {
+    content: attr(data-rank);
+    top: 2px;
+    left: 3px;
+    /* Color based on whether square is light or dark */
+    color: rgba(0, 0, 0, 0.5);
+}
+
+.square.dark::before {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+/* File (Letters a-h) on the bottom */
+.square::after {
+    content: attr(data-file);
+    bottom: 2px;
+    right: 3px;
+    color: rgba(0, 0, 0, 0.5);
+}
+
+.square.dark::after {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+/* Hide the rank numbers except on the very first column (a-file) */
+/* And hide the file letters except on the very last row (rank 1) */
+/* The easiest way is to only show them based on classes we'll add in JS */
+.square:not(.show-rank)::before { display: none; }
+.square:not(.show-file)::after { display: none; }
+
+/* ========================================== */
+/* PERFECT BOARD COORDINATES OVERLAY          */
+/* ========================================== */
+.board-frame {
+    position: relative;
+}
+
+.board-coords {
+    position: absolute;
+    inset: 0;
+    pointer-events: none; /* Allows clicks to pass through to pieces */
+    z-index: 10;
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.board-coords .coord {
+    position: absolute;
+    color: #769656; /* Dark green, matches dark squares */
+    text-shadow: 0 0 2px rgba(255, 255, 255, 0.7); /* Makes it pop on light squares */
+    display: flex;
+}
+
+/* Files (letters a-h) aligned to bottom left of each column */
+.board-coords .coord.file {
+    bottom: 4px;
+    width: 12.5%;
+    justify-content: flex-start;
+    padding-left: 4px;
+}
+
+/* Ranks (numbers 1-8) aligned to top left of each row */
+.board-coords .coord.rank {
+    top: 4px;
+    height: 12.5%;
+    align-items: flex-start;
+    padding-top: 4px;
+    left: 4px;
+}
+
+/* ========================================== */
+/* PERFECT BOARD COORDINATES OVERLAY          */
+/* ========================================== */
+.board-frame {
+    position: relative !important;
+}
+
+.board-coords {
+    position: absolute;
+    inset: 0;
+    pointer-events: none; /* Allows clicks to pass through to pieces */
+    z-index: 10;
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.board-coords .coord {
+    position: absolute;
+    color: rgba(0, 0, 0, 0.6);
+    text-shadow: 0 0 3px rgba(255, 255, 255, 0.9); /* Makes it pop on both light & dark squares */
+    display: flex;
+}
+
+.board-coords .coord.file {
+    bottom: 4px;
+    width: 12.5%;
+    justify-content: flex-start;
+    padding-left: 4px;
+}
+
+.board-coords .coord.rank {
+    top: 4px;
+    height: 12.5%;
+    align-items: flex-start;
+    padding-top: 4px;
+    left: 4px;
+}
+
+.square.light .coord {
+    color: #7a6549;
+}
+
+.square .coord.file {
+    bottom: 3px;
+    right: 3px;
+}
+.square .coord {
+    position: absolute;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+    pointer-events: none;
+    z-index: 4;
+}
+
+.square.dark .coord {
+    color: #eeeed2;
+}
+
+.square .coord.file {
+    bottom: 3px;
+    right: 3px;
+}
+.square .coord.rank {
+    top: 3px;
+    left: 3px;
+}
+.square .coord {
+    position: absolute;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+    pointer-events: none;
+    z-index: 4;
+}

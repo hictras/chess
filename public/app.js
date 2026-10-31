@@ -132,20 +132,24 @@
 
         function renderBoard() {
             if (!state.game) return;
-            const checkedKingSquare = findCheckedKingSquare(state.game);
-            boardEl.innerHTML = "";
+            state.checkedKingSquare = findCheckedKingSquare(state.game);
+
             const files = state.flipped ? "hgfedcba" : "abcdefgh";
             const ranks = state.flipped ? "12345678" : "87654321";
-            const fenRows = state.game.board();
-            const boardMap = {};
-            fenRows.forEach((row, ri) => row.forEach((p, fi) => {
-                if (p) boardMap["abcdefgh"[fi] + (8 - ri)] = p;
-            }));
+            const signature = files + ranks;
+
+            // Grid already built with same orientation -> just update UI
+            if (boardEl.dataset.signature === signature && boardEl.children.length === 64) {
+                updateBoardUI();
+                return;
+            }
+
+            boardEl.innerHTML = "";
+            boardEl.dataset.signature = signature;
 
             for (let r = 0; r < 8; r++) {
                 for (let f = 0; f < 8; f++) {
                     const square = files[f] + ranks[r];
-                    const piece = boardMap[square];
                     const fileIndex = "abcdefgh".indexOf(square[0]);
                     const rank = Number(square[1]);
                     const light = (fileIndex + rank) % 2 === 0;
@@ -153,21 +157,7 @@
                     btn.type = "button";
                     btn.className = "square " + (light ? "light" : "dark");
                     btn.dataset.square = square;
-                    btn.setAttribute("aria-label", square + (piece ? " " + piece.color + " " + piece.type : ""));
-                    if (state.selected === square) btn.classList.add("selected");
-                    if (state.lastMove && (state.lastMove.from === square || state.lastMove.to === square)) btn.classList.add("last-move");
-                    if (square === checkedKingSquare) btn.classList.add("checked-king");
-                    if (piece) {
-                        const span = document.createElement("span");
-                        span.className = "piece " + (piece.color === "w" ? "white" : "black");
-                        span.innerHTML = `<img src="${PIECES[piece.color + piece.type]}" alt="" style="width:100%;height:100%;object-fit:contain;pointer-events:none" />`;
-                        btn.appendChild(span);
-                    }
-                    if (state.legalTargets.includes(square)) {
-                        const mark = document.createElement("span");
-                        mark.className = piece ? "capture-ring" : "dot";
-                        btn.appendChild(mark);
-                    }
+                    btn.addEventListener("click", () => onSquareClick(square));
                     if (f === 0) {
                         const coord = document.createElement("span");
                         coord.className = "coord rank"; coord.textContent = square[1]; btn.appendChild(coord);
@@ -176,10 +166,46 @@
                         const coord = document.createElement("span");
                         coord.className = "coord file"; coord.textContent = square[0]; btn.appendChild(coord);
                     }
-                    btn.addEventListener("click", () => onSquareClick(square));
                     boardEl.appendChild(btn);
                 }
             }
+            updateBoardUI();
+        }
+
+        function updateBoardUI() {
+            if (!state.game) return;
+            const boardMap = {};
+            const fenRows = state.game.board();
+            fenRows.forEach((row, ri) => row.forEach((p, fi) => {
+                if (p) boardMap["abcdefgh"[fi] + (8 - ri)] = p;
+            }));
+
+            Array.from(boardEl.children).forEach(btn => {
+                const sq = btn.dataset.square;
+                if (!sq) return;
+                const piece = boardMap[sq];
+
+                btn.classList.toggle("selected", state.selected === sq);
+                btn.classList.toggle(
+                    "last-move",
+                    !!(state.lastMove && (state.lastMove.from === sq || state.lastMove.to === sq))
+                );
+                btn.classList.toggle("checked-king", sq === state.checkedKingSquare);
+
+                btn.querySelectorAll(".piece, .dot, .capture-ring").forEach(n => n.remove());
+
+                if (piece) {
+                    const span = document.createElement("span");
+                    span.className = "piece " + (piece.color === "w" ? "white" : "black");
+                    span.innerHTML = `<img src="${PIECES[piece.color + piece.type]}" alt="" style="width:100%;height:100%;object-fit:contain;pointer-events:none" />`;
+                    btn.insertBefore(span, btn.firstChild);
+                }
+                if (state.legalTargets.includes(sq)) {
+                    const mark = document.createElement("span");
+                    mark.className = piece ? "capture-ring" : "dot";
+                    btn.appendChild(mark);
+                }
+            });
         }
 
         function onSquareClick(square) {
@@ -229,6 +255,13 @@
 
         function renderState(s) {
             state.latestState = s;
+            // derive last move from history for highlight
+            if (s.history && s.history.length) {
+                const last = s.history[s.history.length - 1];
+                state.lastMove = (last && last.from && last.to) ? { from: last.from, to: last.to } : null;
+            } else {
+                state.lastMove = null;
+            }
             try { state.game = new Chess(s.fen); } catch (_) { return showNotice("Error reading board.", true); }
 
             const other = state.color === "w" ? "b" : "w";
