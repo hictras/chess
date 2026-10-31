@@ -207,5 +207,25 @@
   });
 </script>
 
+
+  <script>
+    // Prevent double-tap zoom on the chessboard for mobile devices
+    document.addEventListener('DOMContentLoaded', () => {
+      const boardEl = document.getElementById('board');
+      if (!boardEl) return;
+
+      let lastTouchEnd = 0;
+      
+      boardEl.addEventListener('touchend', (event) => {
+        const now = (new Date()).getTime();
+        // If the user taps twice within 300ms, prevent the default browser zoom
+        if (now - lastTouchEnd <= 300) {
+          event.preventDefault(); 
+        }
+        lastTouchEnd = now;
+      }, false);
+    });
+  </script>
+
 </body>
 </html>
